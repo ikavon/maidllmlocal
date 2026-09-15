@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.maidllmlocal.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "maidllmlocal.refmap.json",
+  "mixins": [
+    "LLMOpenAIClientMixin"
+  ],
+  "client": [],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

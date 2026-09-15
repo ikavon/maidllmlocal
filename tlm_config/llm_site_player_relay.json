@@ -1,0 +1,14 @@
+{
+  "maica-local": {
+    "id": "maica-local",
+    "api_type": "player_relay",
+    "enabled": true,
+    "icon": "touhou_little_maid:textures/gui/ai_chat/misc.png",
+    "url": "http://127.0.0.1:8100/v1/chat/completions",
+    "secret_key": "",
+    "headers": {},
+    "models": [
+      "maica-daa4"
+    ]
+  }
+}
