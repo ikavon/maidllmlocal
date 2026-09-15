@@ -1,0 +1,20 @@
+{
+  "maica": {
+    "api_type": "maica",
+    "id": "maica",
+    "icon": "touhou_little_maid:textures/ai_icon/misc.png",
+    "url": "wss://maicadev.monika.love/websocket",
+    "enabled": true,
+    "secret_key": "<在这里填你的 MAICA access_token>",
+    "has_thinking_field": false,
+    "headers": {
+      "target_lang": "zh"
+    },
+    "models": {
+      "daa4": {
+        "name": "daa4",
+        "is_reasoning": false
+      }
+    }
+  }
+}

@@ -50,9 +50,10 @@ public final class ClientRelayHandler {
     /**
      * 登录后自报家门。
      *
-     * <p>只上报本机<b>已启用、配了 url、且 api_type 是 player_relay</b> 的站点 id ——
+     * <p>只上报本机<b>已启用、配了 url、且 api_type 是 player_relay 或 maica</b> 的站点 id ——
      * 这一条同时充当了"同意机制"：不想为某个服务器花自己额度的玩家，只要不在本机 llm.json 里
-     * 配 player_relay 站点即可，无需任何额外开关或界面。
+     * 配对应站点即可，无需任何额外开关或界面。两种 api_type 共用一张能力表，
+     * 服务端按本次要用的站点 id 查表，互不干扰。
      */
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn event) {
         Set<String> ids = localRelaySiteIds();
@@ -64,7 +65,16 @@ public final class ClientRelayHandler {
         Set<String> ids = new LinkedHashSet<>();
         try {
             for (LLMSite site : AvailableSites.LLM_SITES.values()) {
-                if (site.enabled() && RelaySite.API_TYPE.equals(site.getApiType()) && !site.url().isEmpty()) {
+                boolean relayable = RelaySite.API_TYPE.equals(site.getApiType())
+                        || com.maidllmlocal.maica.MaicaSite.API_TYPE.equals(site.getApiType());
+                if (site.enabled() && relayable && !site.url().isEmpty()) {
+                    ids.add(site.id());
+                }
+            }
+            // TTS 侧：本机已启用的 mtts 站点同样上报（共用同一张能力表，键是站点 id）
+            for (var site : AvailableSites.TTS_SITES.values()) {
+                if (site.enabled() && com.maidllmlocal.maica.MttsSite.API_TYPE.equals(site.getApiType())
+                        && !site.url().isEmpty()) {
                     ids.add(site.id());
                 }
             }

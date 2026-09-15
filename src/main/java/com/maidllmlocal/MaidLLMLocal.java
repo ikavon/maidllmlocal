@@ -1,5 +1,11 @@
 package com.maidllmlocal;
 
+import com.maidllmlocal.maica.MaicaRelayHub;
+import com.maidllmlocal.maica.MttsRelayHub;
+import com.maidllmlocal.network.MaicaChatRequestPackage;
+import com.maidllmlocal.network.MaicaChatResponsePackage;
+import com.maidllmlocal.network.MttsRequestPackage;
+import com.maidllmlocal.network.MttsResponsePackage;
 import com.maidllmlocal.network.RelayHelloPackage;
 import com.maidllmlocal.network.RelayRequestPackage;
 import com.maidllmlocal.network.RelayResponsePackage;
@@ -47,12 +53,22 @@ public final class MaidLLMLocal {
         registrar.playToServer(RelayResponsePackage.TYPE, RelayResponsePackage.STREAM_CODEC, RelayResponsePackage::handle);
         // C->S：登录时的能力/同意声明
         registrar.playToServer(RelayHelloPackage.TYPE, RelayHelloPackage.STREAM_CODEC, RelayHelloPackage::handle);
+        // S->C：请用你本机的 MAICA 账号跑这一轮对话
+        registrar.playToClient(MaicaChatRequestPackage.TYPE, MaicaChatRequestPackage.STREAM_CODEC, MaicaChatRequestPackage::handle);
+        // C->S：这一轮 MAICA 对话的结果
+        registrar.playToServer(MaicaChatResponsePackage.TYPE, MaicaChatResponsePackage.STREAM_CODEC, MaicaChatResponsePackage::handle);
+        // S->C：请用你本机的 MTTS 配置合成这段语音
+        registrar.playToClient(MttsRequestPackage.TYPE, MttsRequestPackage.STREAM_CODEC, MttsRequestPackage::handle);
+        // C->S：MTTS 合成的音频字节
+        registrar.playToServer(MttsResponsePackage.TYPE, MttsResponsePackage.STREAM_CODEC, MttsResponsePackage::handle);
     }
 
     /** 玩家下线要清掉他的中继能力，并把在途请求回退掉，否则女仆会卡在等待气泡上直到超时。 */
     private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             RelayHub.onPlayerGone(player);
+            MaicaRelayHub.onPlayerGone(player);
+            MttsRelayHub.onPlayerGone(player);
         }
     }
 }

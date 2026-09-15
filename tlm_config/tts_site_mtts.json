@@ -1,0 +1,11 @@
+{
+  "mtts": {
+    "api_type": "mtts",
+    "id": "mtts",
+    "icon": "touhou_little_maid:textures/ai_icon/misc.png",
+    "url": "https://maicadev.monika.love/tts",
+    "enabled": true,
+    "secret_key": "<在这里填你的 MAICA access_token，与 maica LLM 站点相同>",
+    "headers": {}
+  }
+}

@@ -75,6 +75,15 @@ public final class RelayHub {
         }
     }
 
+    /**
+     * 该玩家的客户端是否声明了本机有这个站点。MAICA 中继（{@code MaicaRelayHub}）与本类的
+     * player_relay 共用同一张能力表 —— Hello 协议是同一份，查的键都是站点 id。
+     */
+    public static boolean isCapable(UUID playerId, String siteId) {
+        Set<String> sites = CAPABLE.get(playerId);
+        return sites != null && sites.contains(siteId);
+    }
+
     /** 客户端登录后自报家门。判定标准仅此一处，之后所有中继都查这张表。 */
     public static void onHello(ServerPlayer player, Set<String> siteIds) {
         if (siteIds.isEmpty()) {

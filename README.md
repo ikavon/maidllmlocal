@@ -71,11 +71,56 @@
 不想为某个服务器出钱，就不要在本机配这个站点 —— 服务器收不到它，自然走自己的供给。
 不需要额外的开关或界面。
 
+## `maica` 站点：TLM 直接说 MAICA 协议（v0.2.0 新增）
+
+除了通用的 `player_relay`（OpenAI 兼容端点），模组还内置第二种站点类型 **`api_type = maica`**：
+女仆的聊天直接走 [MAICA](https://github.com/Mon1-innovation/MAICA) 官方后端
+（`wss://maicadev.monika.love/websocket`），不再需要本机跑任何 Python 适配器。
+
+```
+TLM 服务端: MaicaSite → MaicaClient（不自己联网）
+   ──封包──> 玩家客户端: 本机维持一条到 MAICA 的 WebSocket 长连接
+             （握手/参数/流式聚合/断线 reconn 续传/sping 心跳，移植自 maica4tlm 的 wsclient）
+   ──封包──> 服务端合成回复 → 气泡/TTS/历史全部由 TLM 原有代码驱动
+```
+
+与 `player_relay` 的两点关键差异：
+
+- **没有服务端兜底**。MAICA 是单账号单连接，且每玩家用各自的账号 —— access_token 只留在玩家
+  本机，服务端同名站点的 `secret_key` 留空。任何失败（主人离线/没配站点/WS 断了）都直接显示
+  失败气泡，这是设计意图：服务端本来就不该碰玩家的 MAICA 账号。
+- **站点功能由模组原生实现**：session=-1 自带消息（≤10 轮/16KB 自动裁剪，保 system 人设）、
+  MAICA 的情绪标签 `[开心]` 自动清洗、`[player]` 自动替换玩家名、状态码按 status 白名单分级
+  （不按 HTTP 4xx 区间判错——MAICA 的 code 只是"像"RFC9110，400 段是警告不是错误）。
+
+配置：两端 `llm.json` 各加一个同名站点（样例 `tlm_config/llm_site_maica.json`）：
+
+| | `url` | `secret_key` |
+|---|---|---|
+| **客户端** | `wss://maicadev.monika.love/websocket` | **自己的 MAICA access_token** |
+| **服务端** | 同上 | 留空 `""`（codec 要求字段存在，但永远用不到） |
+
+`headers` 里的 `target_lang`（`zh`/`en`）决定 MAICA 的回复语言。`models` 仅为游戏内能选出模型
+而存在，MAICA 后端不使用它。access_token 从 MAICA 的 register 流程获得（DCC 账号）。
+
+### `mtts` 站点：MAICA 官方语音合成
+
+与 `maica` 配套的 TTS 站点类型 **`api_type = mtts`**：女仆的配音直接由 MTTS 合成，
+不再需要本机 GPT-SoVITS 或 Python 适配器。
+
+- 配置：两端 `tts.json` 各加同名站点（样例 `tlm_config/tts_site_mtts.json`），客户端填
+  access_token（与 maica LLM 站点**同一个**），服务端留空。
+- 情绪联动：LLM 那一轮的主导情绪标签（`[开心]` 等 28 词表）会自动传给 MTTS 的 `emotion`
+  参数，语音语气跟随文本情绪。
+- 音频格式：官方节点 `lossless=false` 直接返回 mp3 透传给 TLM；自部署节点若回 wav 会报错
+  （Java 侧不转码）。
+
 ## 目前的状态
 
-- ✅ 编译通过；mixin 的两处注入点已对**实际编译依赖的 jar**逐字节核对
-- ⚠️ **尚未进游戏实测**（需要在整合包里跑一次）
--  尚未做：`maica` 原生站点（ActionQL），见 `maica4tlm` 那边的计划
+- ✅ M1 `player_relay`：编译通过，**单人实测通过**
+- ✅ M3a `maica` LLM 站点 + `mtts` TTS 站点：编译通过（v0.2.0）
+- ⚠️ `maica`/`mtts` **尚未进游戏实测**
+-  尚未做：MTrigger 工具调用（M3b）、情绪→动画
 
 ## 调试
 
