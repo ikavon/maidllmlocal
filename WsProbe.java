@@ -20,7 +20,7 @@ public class WsProbe {
                         + (text.length() > 300 ? text.substring(0, 300) + "..." : text));
                 if (text.contains("maica_connection_initiated")) {
                     String auth = "{\"type\":\"auth\",\"access_token\":\"" + token
-                            + "\",\"frontend_id\":\"maidllmlocal|0.2.0\"}";
+                            + "\",\"frontend_id\":\"maidllmlocal|0.3.0\"}";
                     System.out.println(">>> sending auth");
                     ws.sendText(auth, true).join();
                 }

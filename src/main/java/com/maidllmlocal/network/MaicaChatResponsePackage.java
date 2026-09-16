@@ -18,12 +18,17 @@ import java.nio.charset.StandardCharsets;
  * <p>{@code ok=false} 覆盖一切失败（本机没配站点、WS 连不上、MAICA 致命错误、超时）——
  * 服务端没有自己的 MAICA token，<b>不存在回退</b>，一律转成 {@code onFailure} 气泡。
  * {@code text} 是客户端聚合好的整段回复原文（含情绪标签，清洗在服务端统一做）。
+ * {@code triggersUtf8} 是本轮 MTrigger 调用的 JSON 数组（{@code [{"name","arguments"}]}，
+ * 服务端再解析执行）；站点没开 enable_mt 时是 {@code "[]"}。
  */
-public record MaicaChatResponsePackage(int requestId, boolean ok, byte[] textUtf8, String error)
+public record MaicaChatResponsePackage(int requestId, boolean ok, byte[] textUtf8, byte[] triggersUtf8, String error)
         implements CustomPacketPayload {
 
     /** 一轮回复按 max_tokens 4096 估也就十几 KB，64KB 上限防呆。 */
     public static final int MAX_TEXT_BYTES = 64 * 1024;
+
+    /** 触发器参数都很小（单字段 ≤256 字符），一轮三五条，8KB 绰绰有余。 */
+    public static final int MAX_TRIGGERS_BYTES = 8 * 1024;
 
     public static final CustomPacketPayload.Type<MaicaChatResponsePackage> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(MaidLLMLocal.MODID, "maica_chat_response"));
@@ -32,20 +37,26 @@ public record MaicaChatResponsePackage(int requestId, boolean ok, byte[] textUtf
             ByteBufCodecs.VAR_INT, MaicaChatResponsePackage::requestId,
             ByteBufCodecs.BOOL, MaicaChatResponsePackage::ok,
             ByteBufCodecs.byteArray(MAX_TEXT_BYTES), MaicaChatResponsePackage::textUtf8,
+            ByteBufCodecs.byteArray(MAX_TRIGGERS_BYTES), MaicaChatResponsePackage::triggersUtf8,
             ByteBufCodecs.stringUtf8(512), MaicaChatResponsePackage::error,
             MaicaChatResponsePackage::new);
 
-    public static MaicaChatResponsePackage success(int requestId, String text) {
+    public static MaicaChatResponsePackage success(int requestId, String text, String triggersJson) {
         return new MaicaChatResponsePackage(requestId, true,
-                text.getBytes(StandardCharsets.UTF_8), "");
+                text.getBytes(StandardCharsets.UTF_8),
+                triggersJson.getBytes(StandardCharsets.UTF_8), "");
     }
 
     public static MaicaChatResponsePackage failure(int requestId, String error) {
-        return new MaicaChatResponsePackage(requestId, false, new byte[0], error);
+        return new MaicaChatResponsePackage(requestId, false, new byte[0], new byte[0], error);
     }
 
     public String text() {
         return new String(textUtf8, StandardCharsets.UTF_8);
+    }
+
+    public String triggersJson() {
+        return new String(triggersUtf8, StandardCharsets.UTF_8);
     }
 
     @Override
@@ -62,7 +73,8 @@ public record MaicaChatResponsePackage(int requestId, boolean ok, byte[] textUtf
 
     private static void onHandle(MaicaChatResponsePackage message, IPayloadContext context) {
         if (context.player() instanceof ServerPlayer) {
-            MaicaRelayHub.onResponse(message.requestId(), message.ok(), message.text(), message.error());
+            MaicaRelayHub.onResponse(message.requestId(), message.ok(),
+                    message.text(), message.triggersJson(), message.error());
         }
     }
 }

@@ -115,12 +115,38 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
 - 音频格式：官方节点 `lossless=false` 直接返回 mp3 透传给 TLM；自部署节点若回 wav 会报错
   （Java 侧不转码）。
 
+### MTrigger：女仆不只是会说（v0.3.0 新增）
+
+`api_type = maica` 站点支持 MAICA 原生的 **MTrigger 工具调用**：后端在每轮对话后决策
+「角色该做点什么」，回传机器可读的动作帧，模组把它**直接落到女仆实体上**
+（不走 TLM 的 OpenAI 工具循环——那会把工具结果再喂回 LLM 产生第二轮，双倍延迟双倍额度，
+且 MAICA 不认识 tool 角色消息）。
+
+三种动作：
+
+| 触发器 | 效果 |
+|---|---|
+| `alter_affection` | 好感度增减，写进 TLM 好感度系统（增量取整、每轮钳制 ±5） |
+| `write_memory` | 长期记忆写回：后端蒸馏出一句记忆，存进女仆 NBT（50 条 FIFO，随存档持久） |
+| `switch_work_task` | 切换女仆工作模式（耕作/喂食等，选项来自当前注册的任务列表） |
+
+**默认关闭**。开启方法：两端 `llm.json` 的站点 `headers` 里各加 `"enable_mt": "true"`：
+
+- **客户端**的开关控制：上传触发器表（REST `POST /trigger`——session=-1 下 query 内联的
+  trigger 字段会被后端静默忽略，只能预上传）+ 握手下发 `enable_mt` + 收集触发器帧
+- **服务端**的开关控制：把触发器落到女仆实体 + 每轮向 MAICA 注入「长期记忆 + 当前好感度」
+  上下文——这是服务器管理员对「AI 动女仆实体」的最终否决权
+- 只开一端时另一侧日志会有 warn，功能静默降级为纯聊天
+
+自建节点如果 REST 基地址推导不对（官方节点是 `wss://主机/websocket` ↔ `https://主机/api`），
+在客户端 headers 里加 `"http_base": "https://你的节点/api"` 覆盖。
+
 ## 目前的状态
 
 - ✅ M1 `player_relay`：编译通过，**单人实测通过**
-- ✅ M3a `maica` LLM 站点 + `mtts` TTS 站点：编译通过（v0.2.0）
-- ⚠️ `maica`/`mtts` **尚未进游戏实测**
--  尚未做：MTrigger 工具调用（M3b）、情绪→动画
+- ✅ M3a `maica` LLM 站点 + `mtts` TTS 站点：**游戏内实测通过**（v0.2.0，文本+语音）
+- ⚠️ M3b MTrigger 工具调用（v0.3.0）：编译通过，**尚未进游戏实测**
+-  尚未做：情绪→动画
 
 ## 调试
 

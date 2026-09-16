@@ -43,16 +43,17 @@ public final class MaicaRelayHub {
     private MaicaRelayHub() {
     }
 
-    private record Pending(CompletableFuture<String> future, UUID owner) {
+    private record Pending(CompletableFuture<MaicaRoundResult> future, UUID owner) {
     }
 
     /**
      * 尝试把这一轮对话改派给女仆主人的客户端。
      *
      * @return {@code null} 表示<b>不能中继</b>（无主 / 主人不在线 / 客户端没装模组或没配同名 maica 站点），
-     *         调用方应直接 {@code onFailure}；非 null 的 future 完成值是客户端聚合好的回复原文。
+     *         调用方应直接 {@code onFailure}；非 null 的 future 完成值是客户端聚合好的
+     *         回复原文 + 本轮 MTrigger 调用。
      */
-    public static CompletableFuture<String> dispatch(EntityMaid maid, String siteId, String messagesJson) {
+    public static CompletableFuture<MaicaRoundResult> dispatch(EntityMaid maid, String siteId, String messagesJson) {
         if (messagesJson == null || messagesJson.isEmpty()) {
             return null;
         }
@@ -64,7 +65,7 @@ public final class MaicaRelayHub {
         }
 
         int requestId = NEXT_ID.getAndIncrement();
-        CompletableFuture<String> future = new CompletableFuture<>();
+        CompletableFuture<MaicaRoundResult> future = new CompletableFuture<>();
         PENDING.put(requestId, new Pending(future, owner.getUUID()));
 
         TIMER.schedule(() -> {
@@ -80,13 +81,14 @@ public final class MaicaRelayHub {
     }
 
     /** 客户端回包。必须在服务器主线程上调用（响应包的 handle 已 enqueueWork）。 */
-    public static void onResponse(int requestId, boolean ok, String text, String error) {
+    public static void onResponse(int requestId, boolean ok, String text, String triggersJson, String error) {
         Pending pending = PENDING.remove(requestId);
         if (pending == null) {
             return; // 已被超时或玩家下线处理掉了
         }
         if (ok && text != null && !text.isEmpty()) {
-            pending.future.complete(text);
+            // 触发器 JSON 解析失败按空表处理：回复文本还在，丢了触发器不至于废掉整轮
+            pending.future.complete(new MaicaRoundResult(text, MaicaTrigger.fromJsonArray(triggersJson)));
         } else {
             pending.future.completeExceptionally(
                     new RuntimeException("maica client: " + (error == null || error.isEmpty() ? "empty reply" : error)));

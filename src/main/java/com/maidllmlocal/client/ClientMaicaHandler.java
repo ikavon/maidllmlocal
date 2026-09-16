@@ -3,6 +3,8 @@ package com.maidllmlocal.client;
 import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.client.maica.ClientMaicaSessions;
 import com.maidllmlocal.client.maica.MaicaWsSession;
+import com.maidllmlocal.maica.MaicaRoundResult;
+import com.maidllmlocal.maica.MaicaTrigger;
 import com.maidllmlocal.network.MaicaChatRequestPackage;
 import com.maidllmlocal.network.MaicaChatResponsePackage;
 import net.minecraft.Util;
@@ -39,10 +41,11 @@ public final class ClientMaicaHandler {
     private static MaicaChatResponsePackage doQuery(MaicaWsSession session, MaicaChatRequestPackage request) {
         long start = System.currentTimeMillis();
         try {
-            String text = session.query(request.messagesJson());
-            MaidLLMLocal.LOGGER.info("maica chat ok: {} chars in {}ms",
-                    text.length(), System.currentTimeMillis() - start);
-            return MaicaChatResponsePackage.success(request.requestId(), text);
+            MaicaRoundResult result = session.query(request.messagesJson());
+            MaidLLMLocal.LOGGER.info("maica chat ok: {} chars, {} trigger(s) in {}ms",
+                    result.text().length(), result.triggers().size(), System.currentTimeMillis() - start);
+            return MaicaChatResponsePackage.success(request.requestId(), result.text(),
+                    MaicaTrigger.toJsonArray(result.triggers()));
         } catch (Throwable t) {
             MaidLLMLocal.LOGGER.warn("maica chat failed: {}", t.toString());
             String message = t.getMessage();

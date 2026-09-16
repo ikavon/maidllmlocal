@@ -1,5 +1,7 @@
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
@@ -7,15 +9,44 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 全对话轮探针：模拟 maidllmlocal 的完整会话路径
- * （initiated → auth → established → 通告宽限 → params → query → 流式聚合 → chat_loop_finished）。
- * 用法: java WsQuery "wss://..." "<token>" ["你好"]
+ * MTrigger 探针：先 REST 预上传触发器表（session=-1 下内联 trigger 字段会被静默忽略，
+ * 这是官方节点实测结论），再跑一整轮 enable_mt=true 的对话，把 maica_mtrigger_trigger 帧
+ * 完整打出来。maidllmlocal 的 M3b 客户端逻辑就是这套流程的模组版。
+ *
+ * <p>用法: java WsTriggerProbe "wss://..." "<token>" ["请记住：我最喜欢的花是樱花"]
  */
-public class WsQuery {
+public class WsTriggerProbe {
+
+    /** 与模组 MaicaTriggerUploader 同款的三件套（探针里任务列表随便给两个意思一下）。 */
+    private static final String TABLE = "["
+            + "{\"template\":\"common_affection_template\",\"name\":\"alter_affection\"},"
+            + "{\"template\":\"memory_writeback_template\",\"name\":\"write_memory\"},"
+            + "{\"template\":\"common_switch_template\",\"name\":\"switch_work_task\",\"exprop\":{"
+            + "\"item_name\":{\"zh\":\"工作模式\",\"en\":\"work task\"},"
+            + "\"item_list\":[\"待机\",\"耕作\"],\"suggestion\":false}}"
+            + "]";
+
     public static void main(String[] args) throws Exception {
         String url = args[0];
         String token = args[1];
-        String text = args.length > 2 ? args[2] : "你好，莫妮卡";
+        String text = args.length > 2 ? args[2] : "请记住：我最喜欢的花是樱花";
+
+        // 1) REST 预上传触发器表
+        String httpBase = url.replaceFirst("^wss://", "https://").replaceFirst("^ws://", "http://")
+                .replaceAll("/websocket$", "/api").replaceAll("/+$", "");
+        HttpClient http = HttpClient.newHttpClient();
+        String body = "{\"access_token\":\"" + token + "\",\"chat_session\":\"-1\",\"content\":" + TABLE + "}";
+        HttpResponse<String> resp = http.send(HttpRequest.newBuilder()
+                        .uri(URI.create(httpBase + "/trigger"))
+                        .timeout(Duration.ofSeconds(15))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                HttpResponse.BodyHandlers.ofString());
+        System.out.println(">>> POST " + httpBase + "/trigger -> HTTP " + resp.statusCode());
+        System.out.println("<<< " + resp.body());
+
+        // 2) WS 一整轮（enable_mt=true）
         CountDownLatch done = new CountDownLatch(1);
         StringBuilder reply = new StringBuilder();
 
@@ -49,11 +80,10 @@ public class WsQuery {
                                 + "\",\"frontend_id\":\"maidllmlocal|0.3.0\"}", true);
                     }
                     case "maica_connection_established" -> {
-                        System.out.println("<<< established, sending params");
+                        System.out.println("<<< established, sending params (enable_mt=true)");
                         ws.sendText("{\"type\":\"params\",\"chat_params\":{\"stream_output\":true,"
                                 + "\"target_lang\":\"zh\",\"savefile_access\":false,"
-                                + "\"enable_mt\":false,\"enable_mf\":false},\"reset\":false}", true);
-                        // params 无回执帧要求等待，直接发 query（与 mod 行为一致：drain 只是清残留）
+                                + "\"enable_mt\":true,\"enable_mf\":false},\"reset\":false}", true);
                         String query = "{\"type\":\"query\",\"chat_session\":-1,\"pprt\":true,"
                                 + "\"query\":[{\"role\":\"user\",\"content\":\"" + text + "\"}]}";
                         System.out.println(">>> query: " + text);
@@ -64,18 +94,19 @@ public class WsQuery {
                         reply.append(content);
                         System.out.print(".");
                     }
-                    case "maica_core_complete" -> System.out.println("\n<<< core_complete");
+                    case "maica_mtrigger_trigger" ->
+                            System.out.println("\n<<< MTRIGGER: " + frame);
                     case "maica_chat_loop_finished", "maica_worker_loop_finished" -> {
-                        System.out.println("<<< " + status);
+                        System.out.println("\n<<< " + status);
                         if ("maica_chat_loop_finished".equals(status)) {
                             done.countDown();
                         }
                     }
                     default -> {
                         if (frame.length() > 160) {
-                            System.out.println("<<< [" + status + "] " + frame.substring(0, 160) + "...");
+                            System.out.println("\n<<< [" + status + "] " + frame.substring(0, 160) + "...");
                         } else {
-                            System.out.println("<<< [" + status + "] " + frame);
+                            System.out.println("\n<<< [" + status + "] " + frame);
                         }
                     }
                 }
@@ -83,7 +114,7 @@ public class WsQuery {
         };
 
         long t0 = System.currentTimeMillis();
-        WebSocket ws = HttpClient.newHttpClient().newWebSocketBuilder()
+        WebSocket ws = http.newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
                 .buildAsync(URI.create(url), listener)
                 .get(20, TimeUnit.SECONDS);

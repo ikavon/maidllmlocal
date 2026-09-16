@@ -46,7 +46,8 @@ public final class MaidLLMLocal {
     }
 
     private static void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("1.0.0");
+        // 1.1.0：MaicaChatResponsePackage 增加 triggersUtf8 字段（MTrigger 回传）
+        PayloadRegistrar registrar = event.registrar("1.1.0");
         // S->C：请用你本机的配置把这份请求发出去
         registrar.playToClient(RelayRequestPackage.TYPE, RelayRequestPackage.STREAM_CODEC, RelayRequestPackage::handle);
         // C->S：本机那次请求的结果

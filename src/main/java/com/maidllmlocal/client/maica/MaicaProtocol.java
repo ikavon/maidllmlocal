@@ -32,6 +32,10 @@ final class MaicaProtocol {
     static final String RECONN_EMPTY = "maica_reconn_buffer_empty";
     static final String RECONN_BUFFER_STARTED = "maica_reconn_buffer_started";
 
+    // --- MTrigger ---
+    /** MTrigger 调用帧：content 是 {"name","arguments"}，一轮可能有多帧。 */
+    static final String MTRIGGER_TRIGGER = "maica_mtrigger_trigger";
+
     enum Severity {NORMAL, NOTICE, FATAL}
 
     /** 非致命警告：记录后继续本轮（对应后端 CommonMaicaWarning + continue）。 */
@@ -115,7 +119,7 @@ final class MaicaProtocol {
                  "maica_mspire_searching", "maica_mspire_page_found",
                  "maica_mfocus_tool_call", "maica_mfocus_tool_resp",
                  "maica_mfocus_tool_start", "maica_mfocus_tool_fin",
-                 "maica_mtrigger_trigger", "maica_mtrigger_tool_call",
+                 MTRIGGER_TRIGGER, "maica_mtrigger_tool_call",
                  "maica_mtrigger_tool_start", "maica_mtrigger_tool_fin" -> true;
             default -> false;
         };

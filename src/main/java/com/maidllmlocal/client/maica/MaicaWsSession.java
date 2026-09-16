@@ -4,11 +4,15 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.maidllmlocal.MaidLLMLocal;
+import com.maidllmlocal.maica.MaicaRoundResult;
+import com.maidllmlocal.maica.MaicaTrigger;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -49,6 +53,8 @@ public final class MaicaWsSession implements WebSocket.Listener {
     private final String wsUrl;
     private final String token;
     private final String targetLang;
+    /** 站点 headers 里的开关：开了才下发 enable_mt 并收集触发器帧。 */
+    private final boolean enableMt;
 
     private final BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
     private volatile WebSocket ws;
@@ -59,19 +65,20 @@ public final class MaicaWsSession implements WebSocket.Listener {
         return thread;
     });
 
-    public MaicaWsSession(String wsUrl, String token, String targetLang) {
+    public MaicaWsSession(String wsUrl, String token, String targetLang, boolean enableMt) {
         this.wsUrl = wsUrl;
         this.token = token;
         this.targetLang = targetLang;
+        this.enableMt = enableMt;
     }
 
     // ---------- 对外 ----------
 
     /**
-     * 跑完一整轮对话，返回聚合文本。
+     * 跑完一整轮对话，返回聚合文本与本轮的 MTrigger 调用。
      * 全程持锁（MAICA 单工），并发调用会排队而不是互相踩。
      */
-    public synchronized String query(String messagesJson) throws Exception {
+    public synchronized MaicaRoundResult query(String messagesJson) throws Exception {
         ensureConnected();
         JsonObject payload = new JsonObject();
         payload.addProperty("type", "query");
@@ -128,7 +135,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
         JsonObject auth = new JsonObject();
         auth.addProperty("type", "auth");
         auth.addProperty("access_token", token);
-        auth.addProperty("frontend_id", "maidllmlocal|0.2.0");
+        auth.addProperty("frontend_id", "maidllmlocal|0.3.0");
         send(auth);
 
         // 登录成功依次收 login_id/user/nickname → established → model_anno → 可选 feature_*
@@ -167,12 +174,12 @@ public final class MaicaWsSession implements WebSocket.Listener {
             }
         }
 
-        // 下发参数：TLM 场景最小集。enable_mt=false —— MTrigger 是 M3b 的事
+        // 下发参数：TLM 场景最小集。enable_mt 跟着站点配置走——关着时后端根本不发触发器帧
         JsonObject chatParams = new JsonObject();
         chatParams.addProperty("stream_output", true);
         chatParams.addProperty("target_lang", targetLang);
         chatParams.addProperty("savefile_access", false);
-        chatParams.addProperty("enable_mt", false);
+        chatParams.addProperty("enable_mt", enableMt);
         chatParams.addProperty("enable_mf", false);
         JsonObject params = new JsonObject();
         params.addProperty("type", "params");
@@ -187,9 +194,10 @@ public final class MaicaWsSession implements WebSocket.Listener {
 
     // ---------- 一轮对话 ----------
 
-    private String collectStream(long deadline) throws Exception {
+    private MaicaRoundResult collectStream(long deadline) throws Exception {
         StringBuilder buf = new StringBuilder();
         StringBuilder notices = new StringBuilder();
+        List<MaicaTrigger> triggers = new ArrayList<>();
         while (true) {
             MaicaProtocol.Envelope env = recv(remaining(deadline));
             String status = env.status();
@@ -198,20 +206,32 @@ public final class MaicaWsSession implements WebSocket.Listener {
                 buf.append(env.content());
                 continue;
             }
+            if (MaicaProtocol.MTRIGGER_TRIGGER.equals(status)) {
+                // MTrigger 调用帧：content 是 {"name","arguments"}。它是数据帧不是状态帧——
+                // 坏帧记 warn 跳过，一个坏触发器不该杀掉整轮回复
+                MaicaTrigger trigger = MaicaTrigger.fromFrameContent(env.content());
+                if (trigger != null) {
+                    triggers.add(trigger);
+                    MaidLLMLocal.LOGGER.info("maica trigger: {} {}", trigger.name(), trigger.arguments());
+                } else {
+                    MaidLLMLocal.LOGGER.warn("maica trigger frame malformed: {}", abbreviate(env.content()));
+                }
+                continue;
+            }
             if (MaicaProtocol.LOOP_FINISHED.equals(status)) {
                 // 真实后端每轮结束后会补发一帧 worker_loop_finished，吞掉免得残留到下一轮
                 drain(DRAIN_BUDGET_MS);
                 if (notices.length() > 0) {
                     MaidLLMLocal.LOGGER.info("maica round finished with notices: {}", notices);
                 }
-                return buf.toString();
+                return new MaicaRoundResult(buf.toString(), triggers);
             }
             if (MaicaProtocol.SESSION_WARN_RESET.equals(status)) {
                 // 后端 warning → 发本帧 → continue：本轮不会再有 finished 帧，就此结束
                 close(); // 断开是唯一能保证下一轮干净的做法
                 if (buf.length() > 0) {
                     MaidLLMLocal.LOGGER.warn("maica round reset by server, degraded to {} chars", buf.length());
-                    return buf.toString();
+                    return new MaicaRoundResult(buf.toString(), triggers);
                 }
                 throw new Exception("MAICA round reset with no output: " + env.content());
             }
@@ -231,8 +251,9 @@ public final class MaicaWsSession implements WebSocket.Listener {
         }
     }
 
-    /** 断线续传：重连+重认证后发 reconn，收完缓冲。仅核心模型已开始生成时有效。 */
-    private String recoverStream() throws Exception {
+    /** 断线续传：重连+重认证后发 reconn，收完缓冲。仅核心模型已开始生成时有效。
+     *  续传缓冲只保存文本——中断那一轮的触发器会丢（见 {@link MaicaRoundResult}）。 */
+    private MaicaRoundResult recoverStream() throws Exception {
         close();
         ensureConnected();
         JsonObject reconn = new JsonObject();
@@ -252,7 +273,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
                 if (MaicaProtocol.RECONN_DRAINED.equals(status) && buf.length() == 0) {
                     throw new Exception("MAICA reconn buffer empty: interruption happened before generation, resend the round");
                 }
-                return buf.toString();
+                return new MaicaRoundResult(buf.toString(), List.of());
             }
             if (MaicaProtocol.RECONN_EMPTY.equals(status)) {
                 throw new Exception("MAICA reconn buffer empty: interruption happened before generation, resend the round");
