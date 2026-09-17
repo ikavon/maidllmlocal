@@ -3,6 +3,7 @@ package com.maidllmlocal.relay;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.SerializableSite;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.Site;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.LLMOpenAISite;
+import com.maidllmlocal.util.TlmSiteCodec;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.resources.ResourceLocation;
@@ -40,6 +41,10 @@ public class RelaySite extends LLMOpenAISite {
      * <p>注意 1.21 的 MODELS 是 {@code Map<String, ModelEntry>}，不是 1.20 的 {@code Map<String, String>}。
      */
     public static class Serializer extends LLMOpenAISite.Serializer {
+        /** 容错版 models：数组或对象映射都吃（见 {@link TlmSiteCodec#tolerantModels} 注释）。 */
+        private static final Codec<Map<String, LLMOpenAISite.ModelEntry>> MODELS =
+                TlmSiteCodec.tolerantModels(MODELS_CODEC, SINGLE_MODEL_CODEC);
+
         /**
          * 构造目标仍是 {@link RelaySite}，所以从 json 读回来的对象是货真价实的 RelaySite，
          * {@code getApiType()} 因此正确 —— 这一点很关键，{@code LLMSite.writeSites} 正是靠
@@ -53,7 +58,7 @@ public class RelaySite extends LLMOpenAISite {
                 Codec.STRING.fieldOf(Site.SECRET_KEY).forGetter(RelaySite::secretKey),
                 Codec.BOOL.optionalFieldOf(Site.HAS_THINKING_FIELD, false).forGetter(RelaySite::hasThinkingField),
                 Codec.unboundedMap(Codec.STRING, Codec.STRING).fieldOf(Site.HEADERS).forGetter(RelaySite::headers),
-                MODELS_CODEC.fieldOf(Site.MODELS).forGetter(RelaySite::modelEntries)
+                MODELS.optionalFieldOf(Site.MODELS, Map.of()).forGetter(RelaySite::modelEntries)
         ).apply(instance, RelaySite::new));
 
         @Override

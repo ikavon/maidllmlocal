@@ -4,6 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.SerializableSite;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.Site;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.LLMOpenAISite;
+import com.maidllmlocal.util.TlmSiteCodec;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.resources.ResourceLocation;
@@ -46,6 +47,10 @@ public class MaicaSite extends LLMOpenAISite {
 
     /** 与 {@link com.maidllmlocal.relay.RelaySite.Serializer} 同款写法，理由见彼处注释。 */
     public static class Serializer extends LLMOpenAISite.Serializer {
+        /** 容错版 models：数组或对象映射都吃（见 {@link TlmSiteCodec#tolerantModels} 注释）。 */
+        private static final Codec<Map<String, LLMOpenAISite.ModelEntry>> MODELS =
+                TlmSiteCodec.tolerantModels(MODELS_CODEC, SINGLE_MODEL_CODEC);
+
         public static final Codec<MaicaSite> MAICA_CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.fieldOf(Site.ID).forGetter(MaicaSite::id),
                 ResourceLocation.CODEC.fieldOf(Site.ICON).forGetter(MaicaSite::icon),
@@ -54,7 +59,7 @@ public class MaicaSite extends LLMOpenAISite {
                 Codec.STRING.fieldOf(Site.SECRET_KEY).forGetter(MaicaSite::secretKey),
                 Codec.BOOL.optionalFieldOf(Site.HAS_THINKING_FIELD, false).forGetter(MaicaSite::hasThinkingField),
                 Codec.unboundedMap(Codec.STRING, Codec.STRING).fieldOf(Site.HEADERS).forGetter(MaicaSite::headers),
-                MODELS_CODEC.fieldOf(Site.MODELS).forGetter(MaicaSite::modelEntries)
+                MODELS.optionalFieldOf(Site.MODELS, Map.of()).forGetter(MaicaSite::modelEntries)
         ).apply(instance, MaicaSite::new));
 
         @Override

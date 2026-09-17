@@ -2,7 +2,7 @@
   "maica": {
     "api_type": "maica",
     "id": "maica",
-    "icon": "touhou_little_maid:textures/ai_icon/misc.png",
+    "icon": "touhou_little_maid:textures/gui/ai_chat/misc.png",
     "url": "wss://maicadev.monika.love/websocket",
     "enabled": true,
     "secret_key": "<在这里填你的 MAICA access_token>",
@@ -10,11 +10,6 @@
     "headers": {
       "target_lang": "zh"
     },
-    "models": {
-      "daa4": {
-        "name": "daa4",
-        "is_reasoning": false
-      }
-    }
+    "models": ["daa4"]
   }
 }
