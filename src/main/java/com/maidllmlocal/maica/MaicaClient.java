@@ -91,26 +91,32 @@ public class MaicaClient implements LLMClient {
     }
 
     /**
-     * 把本机托管的上下文（长期记忆 + 当前好感度）拼成一条 system 消息，插到人设消息之后。
-     * 只改这一轮的发送副本，不写回 TLM 历史——否则历史里会越攒越多条重复的记忆。
+     * 把本机托管的上下文（长期记忆 + 当前好感度）拼成文本，<b>并入</b>人设 system 消息的正文。
+     *
+     * <p>为什么不是"再插一条 system 消息"：MAICA 后端对 query 的校验是
+     * "System message must be at the beginning"——全列表只允许位于开头的那一条 system。
+     * 多插一条（哪怕紧挨着人设）整轮直接 400（2026-09-17 实测）。所以合并进唯一的人设
+     * system 消息；历史里若没有 system 人设，才把注入块作为单独一条放在开头。
+     *
+     * <p>只改这一轮的发送副本，不写回 TLM 历史——否则历史里会越攒越多条重复的记忆。
      */
     private static List<LLMMessage> withContextInjection(EntityMaid maid, List<LLMMessage> history) {
         String block = MaicaMemory.promptBlock(maid);
         if (block.isEmpty()) {
             return history;
         }
-        LLMMessage context = new LLMMessage(Role.SYSTEM, block, maid.level().getGameTime());
-        List<LLMMessage> copy = new ArrayList<>(history.size() + 1);
-        boolean inserted = false;
+        List<LLMMessage> copy = new ArrayList<>(history.size());
+        boolean merged = false;
         for (LLMMessage msg : history) {
-            if (!inserted && msg.role() != Role.SYSTEM && msg.role() != Role.DEVELOPER) {
-                copy.add(context);
-                inserted = true;
+            if (!merged && (msg.role() == Role.SYSTEM || msg.role() == Role.DEVELOPER)) {
+                copy.add(new LLMMessage(msg.role(), msg.message() + "\n\n" + block, msg.gameTime()));
+                merged = true;
+                continue;
             }
             copy.add(msg);
         }
-        if (!inserted) {
-            copy.add(context);
+        if (!merged) {
+            copy.add(0, new LLMMessage(Role.SYSTEM, block, maid.level().getGameTime()));
         }
         return copy;
     }
