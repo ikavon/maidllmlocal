@@ -84,6 +84,12 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
    ──封包──> 服务端合成回复 → 气泡/TTS/历史全部由 TLM 原有代码驱动
 ```
 
+> 关于注释里的 `maica4tlm`：它是本项目的前身——一个把 MAICA 的 WebSocket 协议转成 OpenAI
+> HTTP 接口、供原版 TLM 直连的 Python 适配器（暂未公开；如有兴趣欢迎开 issue 交流）。本模组的 Java 端
+> `maica`/`mtts` 站点是它「甩开 Python、直接在玩家客户端说 MAICA 原生协议」的重写版，协议
+> 逻辑（wsclient/auth/protocol/emotions/audio）逐条移植自它。当前主链路**不依赖它**；下文
+> 偶尔提到的端点（如 `127.0.0.1:8100`）是它作为可选独立部署的残留路径，不用也完全不影响。
+
 与 `player_relay` 的两点关键差异：
 
 - **没有服务端兜底**。MAICA 是单账号单连接，且每玩家用各自的账号 —— access_token 只留在玩家
