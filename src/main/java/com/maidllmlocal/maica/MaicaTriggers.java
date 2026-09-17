@@ -29,20 +29,20 @@ public final class MaicaTriggers {
     private MaicaTriggers() {
     }
 
-    public static void apply(EntityMaid maid, List<MaicaTrigger> triggers) {
+    public static void apply(EntityMaid maid, List<MaicaTrigger> triggers, String playerName) {
         for (MaicaTrigger trigger : triggers) {
             try {
-                applyOne(maid, trigger);
+                applyOne(maid, trigger, playerName);
             } catch (Throwable t) {
                 MaidLLMLocal.LOGGER.warn("maica trigger {} failed: {}", trigger.name(), t.toString());
             }
         }
     }
 
-    private static void applyOne(EntityMaid maid, MaicaTrigger trigger) {
+    private static void applyOne(EntityMaid maid, MaicaTrigger trigger, String playerName) {
         switch (trigger.name()) {
             case "alter_affection" -> alterAffection(maid, trigger.arguments());
-            case "write_memory" -> writeMemory(maid, trigger.arguments());
+            case "write_memory" -> writeMemory(maid, trigger.arguments(), playerName);
             case "switch_work_task" -> switchWorkTask(maid, trigger.arguments());
             default -> MaidLLMLocal.LOGGER.warn("unknown maica trigger {}, ignored", trigger.name());
         }
@@ -70,13 +70,14 @@ public final class MaicaTriggers {
     }
 
     /** {@code {"memory_item": "<一句记忆>"}} → 女仆 NBT（下轮起注入 prompt）。 */
-    private static void writeMemory(EntityMaid maid, JsonObject args) {
+    private static void writeMemory(EntityMaid maid, JsonObject args, String playerName) {
         JsonElement item = args.get("memory_item");
         if (item == null || !item.isJsonPrimitive()) {
             MaidLLMLocal.LOGGER.warn("maica write_memory without memory_item: {}", args);
             return;
         }
-        String memory = item.getAsString().strip();
+        // 蒸馏句也可能带玩家占位符，落盘前换成真名（模型自己就是 DDLC/MAS 训练的）
+        String memory = MaicaText.replacePlayer(item.getAsString().strip(), playerName);
         if (memory.isEmpty()) {
             return;
         }

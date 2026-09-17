@@ -34,19 +34,23 @@ public class MaicaClient implements LLMClient {
 
     @Override
     public void chat(LLMCallback callback) {
+        EntityMaid maid = callback.getMaid();
+        // 玩家名贯穿三处：输入宏展开、输出占位符替换、write_memory 落盘前清洗
+        String playerName = maid.getOwner() != null ? maid.getOwner().getName().getString() : "";
         String messagesJson;
         try {
             List<LLMMessage> history = callback.getMessages();
             if (enableMt()) {
-                history = withContextInjection(callback.getMaid(), history);
+                history = withContextInjection(maid, history);
             }
-            messagesJson = MaicaMessages.toJson(history);
+            // 输入侧展开：MAS 人设卡常带 {player_name}，发出去前换成真名，模型不必再见宏
+            messagesJson = MaicaMessages.toJson(expandPlayerMacros(history, playerName));
         } catch (Throwable t) {
             fail(callback, t);
             return;
         }
 
-        CompletableFuture<MaicaRoundResult> future = MaicaRelayHub.dispatch(callback.getMaid(), site.id(), messagesJson);
+        CompletableFuture<MaicaRoundResult> future = MaicaRelayHub.dispatch(maid, site.id(), messagesJson);
         if (future == null) {
             fail(callback, new RuntimeException(
                     "owner client unavailable for maica site " + site.id()
@@ -59,9 +63,7 @@ public class MaicaClient implements LLMClient {
                 fail(callback, throwable);
                 return;
             }
-            // 情绪清洗与 [player] 替换统一在服务端做：客户端只回原文，逻辑只有一份
-            String playerName = callback.getMaid().getOwner() != null
-                    ? callback.getMaid().getOwner().getName().getString() : "";
+            // 情绪清洗与玩家占位符替换统一在服务端做：客户端只回原文，逻辑只有一份
             String text = MaicaText.stripTags(MaicaText.replacePlayer(result.text(), playerName));
             if (text.isEmpty()) {
                 fail(callback, new RuntimeException("maica reply empty after emotion stripping"));
@@ -72,7 +74,7 @@ public class MaicaClient implements LLMClient {
             callback.runOnServerThread(() -> {
                 // MTrigger 落地（好感度/记忆/换任务）后再出气泡：文本与动作同一拍呈现
                 if (enableMt()) {
-                    MaicaTriggers.apply(callback.getMaid(), result.triggers());
+                    MaicaTriggers.apply(maid, result.triggers(), playerName);
                 } else if (!result.triggers().isEmpty()) {
                     MaidLLMLocal.LOGGER.warn("dropped {} maica trigger(s): server-side site {} lacks enable_mt in headers",
                             result.triggers().size(), site.id());
@@ -80,6 +82,18 @@ public class MaicaClient implements LLMClient {
                 callback.onSuccess(new ResponseChat(text));
             });
         });
+    }
+
+    /** 把消息正文里的玩家占位符（[player] / {player_name} 两族）换成真名。只动发送副本。 */
+    private static List<LLMMessage> expandPlayerMacros(List<LLMMessage> history, String playerName) {
+        if (playerName.isEmpty()) {
+            return history;
+        }
+        List<LLMMessage> out = new ArrayList<>(history.size());
+        for (LLMMessage msg : history) {
+            out.add(new LLMMessage(msg.role(), MaicaText.replacePlayer(msg.message(), playerName), msg.gameTime()));
+        }
+        return out;
     }
 
     /**

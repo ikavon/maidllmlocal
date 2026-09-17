@@ -18,9 +18,18 @@ import java.util.regex.Pattern;
  */
 public final class MaicaText {
 
-    /** [player] / [player_nickname]，容忍中括号内空格，大小写不敏感。 */
+    /**
+     * 玩家占位符两族，容忍括号内空格，大小写不敏感：
+     * <ul>
+     *   <li>方括号族 {@code [player]} / {@code [player_nickname]} —— maica4tlm 时代的契约形状</li>
+     *   <li>花括号族 {@code {player}} / {@code {player_name}} / {@code {player_nickname}} ——
+     *       DDLC/MAS 原生宏。DAA4 训练数据用的就是这个，模型输出里会直接吐
+     *       {@code {player_name}}；MAS 人设卡搬过来时输入侧也会带（2026-09-17 游戏内实锤）</li>
+     * </ul>
+     */
     private static final Pattern PLAYER_RE = Pattern.compile(
-            "\\[\\s*player(?:_nickname)?\\s*]", Pattern.CASE_INSENSITIVE);
+            "\\[\\s*player(?:_nickname)?\\s*]|\\{\\s*player(?:_name)?(?:_nickname)?\\s*}",
+            Pattern.CASE_INSENSITIVE);
 
     /** 候选标签：中括号内是纯中文或纯英文单词（允许内部空格），再由词表裁决。 */
     private static final Pattern TAG_RE = Pattern.compile(
