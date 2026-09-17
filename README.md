@@ -153,6 +153,7 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
 | 现象 | 说明 |
 |---|---|
 | 启动日志有 `announced N relay-capable local site(s): [...]` | 客户端自报的可中继站点，N=0 说明本机没配 `player_relay` 站点 |
+| **llm.json 被"还原"、token 消失** | TLM 的站点设置界面开关会把**内存里的整表**写回 llm.json。若某次加载时文件解码失败（JSON 语法错、headers 值不是字符串等），内存就是默认值——此时点一下开关，磁盘文件即被默认值覆盖。规则：**游戏运行时别改 llm.json；改坏了先修文件、重启游戏、别碰站点开关** |
 | `Reference map 'maidllmlocal.refmap.json' ... could not be read` | **无害**。NeoForge 生产用官方映射，refmap 只在开发期有意义；TLM、`maidttslocal`、`conflict_fix` 都不带 refmap |
 | 女仆不回复 / 报连接错误 | 看服务端 `latest.log`。主人离线时会用服务端那份 `url`，服务端没配有效 url 就会失败 |
 | mixin 报错找不到注入点 | TLM 重构了 `LLMOpenAIClient.chat`。这是**有意为之**（`defaultRequire: 1`），比静默失效好 |
