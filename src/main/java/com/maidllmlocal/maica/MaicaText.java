@@ -22,13 +22,16 @@ public final class MaicaText {
      * 玩家占位符两族，容忍括号内空格，大小写不敏感：
      * <ul>
      *   <li>方括号族 {@code [player]} / {@code [player_nickname]} —— maica4tlm 时代的契约形状</li>
-     *   <li>花括号族 {@code {player}} / {@code {player_name}} / {@code {player_nickname}} ——
-     *       DDLC/MAS 原生宏。DAA4 训练数据用的就是这个，模型输出里会直接吐
-     *       {@code {player_name}}；MAS 人设卡搬过来时输入侧也会带（2026-09-17 游戏内实锤）</li>
+     *   <li>花括号族 {@code {player_name}} 系与 {@code {owner_name}} 系 ——
+     *       前者是 DDLC/MAS 原生宏（DAA4 训练数据用的就是它，输出会直接吐），
+     *       后者是 TLM 角色卡生态的原生写法（车万语境里玩家=主人）。两种卡都会带着宏
+     *       进来，而 TLM 的聊天路径并不解析它们（2026-09-17 游戏内实锤）。
+     *       正解始终是人设卡里直接写真名；这里是兜底网。</li>
      * </ul>
      */
     private static final Pattern PLAYER_RE = Pattern.compile(
-            "\\[\\s*player(?:_nickname)?\\s*]|\\{\\s*player(?:_name)?(?:_nickname)?\\s*}",
+            "\\[\\s*player(?:_nickname)?\\s*]"
+                    + "|\\{\\s*(?:player|owner)(?:_name)?(?:_nickname)?\\s*}",
             Pattern.CASE_INSENSITIVE);
 
     /** 候选标签：中括号内是纯中文或纯英文单词（允许内部空格），再由词表裁决。 */
