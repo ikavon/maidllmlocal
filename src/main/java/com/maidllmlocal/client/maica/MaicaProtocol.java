@@ -41,6 +41,7 @@ final class MaicaProtocol {
     /** 非致命警告：记录后继续本轮（对应后端 CommonMaicaWarning + continue）。 */
     private static final Set<String> NOTICE_STATUSES = Set.of(
             SESSION_WARN_RESET,
+            "maica_loop_warn_resets", // 09-17 实测：握手里的这条是复数拼写
             "maica_login_token_corrupted", "maica_login_token_invalid",
             "maica_login_f2b", "maica_login_banned",
             "maica_login_email_unchecked", "maica_login_tos_unaccepted",
@@ -51,6 +52,18 @@ final class MaicaProtocol {
             "mfocus_serp_failed",
             "maica_unified_warning"
     );
+
+    /**
+     * 登录阶段的拒绝。后端把它们发成 NOTICE 级别（"我的循环不崩"），但对客户端而言
+     * <b>established 永远等不到了</b>——服务端发完就 loop_warn_reset 回 stage 1 重新等 auth。
+     * v0.4.0 游戏内实测教训：只按"400 段是警告"一刀切，把 token 打错这种一句话能说清的
+     * 失败拖成 30 秒 FrameTimeoutException + 日志考古。握手循环必须用这个集合快速失败。
+     */
+    static final Set<String> LOGIN_REJECT_STATUSES = Set.of(
+            "maica_login_token_corrupted", "maica_login_token_invalid",
+            "maica_login_f2b", "maica_login_banned",
+            "maica_login_email_unchecked", "maica_login_tos_unaccepted",
+            "maica_connection_reuse_denied");
 
     /** 致命错误：本轮报废 → 断开 → 抛出（对应后端 CommonMaicaError，is_breaking）。 */
     private static final Set<String> FATAL_STATUSES = Set.of(

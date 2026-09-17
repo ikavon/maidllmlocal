@@ -56,6 +56,17 @@ public final class ClientRelayHandler {
      * 服务端按本次要用的站点 id 查表，互不干扰。
      */
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn event) {
+        resync();
+    }
+
+    /**
+     * （重新）上报本机能力。登录时自动调用；自动登录换到 token、把本机站点 enable 之后
+     * 也要调一次，否则服务端还以为这台客户端什么都能不了。
+     */
+    public static void resync() {
+        if (Minecraft.getInstance().getConnection() == null) {
+            return;
+        }
         Set<String> ids = localRelaySiteIds();
         PacketDistributor.sendToServer(RelayHelloPackage.of(ids));
         MaidLLMLocal.LOGGER.info("announced {} relay-capable local site(s): {}", ids.size(), ids);

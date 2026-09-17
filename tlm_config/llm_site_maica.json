@@ -5,7 +5,7 @@
     "icon": "touhou_little_maid:textures/gui/ai_chat/misc.png",
     "url": "wss://maicadev.monika.love/websocket",
     "enabled": true,
-    "secret_key": "<在这里填你的 MAICA access_token>",
+    "secret_key": "",
     "has_thinking_field": false,
     "headers": {
       "target_lang": "zh"

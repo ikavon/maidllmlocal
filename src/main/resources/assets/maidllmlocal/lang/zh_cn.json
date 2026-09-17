@@ -1,0 +1,5 @@
+{
+  "maidllmlocal.autologin.ok": "MAICA 自动登录成功（以 %s 身份）：token 已写入本机站点配置，可以直接聊天了",
+  "maidllmlocal.autologin.failed": "MAICA 自动登录失败：%s",
+  "maidllmlocal.autologin.hint": "→ 核对 config/maidllmlocal/maica_account.json：登录支持【论坛ID】或【注册邮箱】两种，但后端是精确匹配——ID 区分拼写且昵称不算；密码若含 \" 或 \\ 在 JSON 里必须写成 \\\" 和 \\\\；可拿同样的值到 forum.monika.love 登录页验证。改完重新进入世界生效（同一份错误凭据一次游戏内不会反复重试，避免触发风控锁定）"
+}

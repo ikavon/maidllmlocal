@@ -103,7 +103,8 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
 `headers` 里的 `target_lang`（`zh`/`en`）决定 MAICA 的回复语言——**值必须是字符串**（写成
 布尔或数字会让整个站点解码失败）。`models` 仅为游戏内能选出模型而存在，MAICA 后端不使用它，
 且**必须是数组形式**（`["daa4"]`）——TLM 的 codec 只认数组，对象形式同样会静默丢弃整个站点
-（详见下方调试表）。access_token 从 MAICA 的 register 流程获得（DCC 账号）。
+（详见下方调试表）。access_token 从 MAICA 的 register 流程获得（DCC 账号）——
+**v0.4.0 起这一步通常是免做的**，见下文「玩家免手动：自动登录」。
 
 ### `mtts` 站点：MAICA 官方语音合成
 
@@ -132,22 +133,79 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
 | `write_memory` | 长期记忆写回：后端蒸馏出一句记忆，存进女仆 NBT（50 条 FIFO，随存档持久） |
 | `switch_work_task` | 切换女仆工作模式（耕作/喂食等，选项来自当前注册的任务列表） |
 
-**默认关闭**。开启方法：两端 `llm.json` 的站点 `headers` 里各加 `"enable_mt": "true"`：
+**默认关闭**，且**服务端与客户端两端都要为真**才真正生效——这是一道刻意保留的权限边界：
+MTrigger 会改世界状态（好感度写进 TLM 系统、记忆持久化进女仆 NBT、`setTask` 换工作模式），
+在别人的服务器上这属于管理员的领地，默认关、要显式开。两端各自的最简开法：
 
-- **客户端**的开关控制：上传触发器表（REST `POST /trigger`——session=-1 下 query 内联的
-  trigger 字段会被后端静默忽略，只能预上传）+ 握手下发 `enable_mt` + 收集触发器帧
-- **服务端**的开关控制：把触发器落到女仆实体 + 每轮向 MAICA 注入「长期记忆 + 当前好感度」
-  上下文——这是服务器管理员对「AI 动女仆实体」的最终否决权
-- 只开一端时另一侧日志会有 warn，功能静默降级为纯聊天
+- **服务端（管理员领地，保持手动）**：服务端 `llm.json` 的 `maica` 站点 `headers` 加
+  `"enable_mt": "true"`。控制：把触发器落到女仆实体 + 每轮向 MAICA 注入「长期记忆 + 当前好感度」
+  上下文。这是管理员对「AI 动女仆实体」的最终否决权，一次部署级配置。
+- **客户端（普通玩家，v0.4.0 起免翻 JSON）**：在 `maica_account.json` 里加 `"enable_mt": true`
+  即可——模组会把它并进本机站点 headers（`target_lang` 同理）。**换没换到 token 都生效、密码删了
+  也生效**：已有 token 时走独立的 headers 同步步，改完账号文件重新进一次世界即可，不必重取 token。
+  控制：上传触发器表（REST `POST /trigger`——session=-1 下 query 内联的 trigger 字段被后端静默
+  忽略，只能预上传）+ 握手下发 `enable_mt` + 收集触发器帧。
+- 只开一端时另一侧日志会有 warn，功能静默降级为纯聊天（服务端没开时客户端别开，否则白付一轮
+  MTrigger 后处理的延迟）。
+
+> **计划中的收敛（v0.5 候选，未实现）**：让服务端把「本服哪些站点已开 mt」随能力握手下发，
+> 客户端自动跟随；届时玩家的 `enable_mt` 会从「要配的开」降级为「不想让 AI 动我女仆时的 opt-out」，
+> 对普通玩家零配置。代价是响应包加字段（registrar 版本再 bump）+ 两端兼容判断，属协议面改动，
+> 与发布节奏一并规划。
 
 自建节点如果 REST 基地址推导不对（官方节点是 `wss://主机/websocket` ↔ `https://主机/api`），
 在客户端 headers 里加 `"http_base": "https://你的节点/api"` 覆盖。
+
+## 玩家免手动：自动登录（v0.4.0 新增）
+
+普通玩家不该为了用女仆聊天去跑脚本、翻 JSON、要 OP 权限。**v0.4.0 把「拿 token」整个内藏进模组**：
+玩家只写一个账号文件，token 由模组自动换、自动回填。
+
+```
+config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模组启动时不存在则自动生成模板）
+    { "username": "DCC注册邮箱（推荐）或论坛登录用户名", "password": "DCC密码" }
+    ⚠️ 别填 MC 游戏名或论坛昵称——后端按注册邮箱/登录用户名精确匹配（详见调试表）
+              │
+   玩家进世界 → 模组后台: 发现节点 → POST /register → 拿 access_token → GET /legality 验证
+              │
+   自动回填到**本机** config/touhou_little_maid/sites/{llm,tts}.json 的 secret_key，
+   并把本机这两条站点 enabled=true → 重新向服务端上报能力 → 聊天栏提示成功
+```
+
+对玩家的实际动作：**填一次账号密码，进世界，之后聊天栏看到「MAICA 自动登录成功」就能直接聊**。
+不必知道 token 是什么、长什么样、填在哪个字段；MP 普通玩家也不需要任何权限（写的是自己游戏目录的文件）。
+
+三条设计约束：
+
+- **手工优先**：只要本机 `llm.json` 的 `maica` 站点已有 `secret_key`，模组就完全不插手——自动登录只填空位。
+- **原位写回**：文件只动 `maica`/`mtts` 那一个条目的 `secret_key`/`enabled`（外加账号文件指定的
+  `target_lang`/`enable_mt`），其余站点、其余字段、JSON 格式一概不碰。
+- **条目缺失会整条创建**：其实通常用不上——装了本模组后，TLM 自己启动时就会把 `maica`/`mtts`
+  默认条目写进两端配置（注册的 serializer 自动带出 defaultSite）。但万一文件里真没有（手删过、
+  旧文件），回填时模组会用与 TLM 写盘同一条 codec 路径创建完整条目。**「配置里完全没写 MAICA」
+  也能一步到位**，样例 `tlm_config/` 只是给管理员抄自定义字段用的参考。
+- **先验证、后回填**：`/register` 是纯加密接口，**不校验账号密码对错**（API 文档原话），密码错
+  照样发一个 token。所以拿到 token 先调 `GET /legality` 做一次真登录核验，通过才回填并提示成功
+  （提示会带论坛用户名，即"以谁的身份登录"）；被拒则不写文件，聊天栏直接给出服务端原话 + 处置建议。
+- **Fail2Ban 纪律**：进一次世界至多一次 register + 一次 legality（网络层重试封顶），
+  同一份被拒凭据本会话内不再重试（改过账号文件才会再试）—— 服务端 20 次失败锁账号 600 秒
+  （HTTP/WS 共享计数），密码里带首尾空格会被 trim（手填 JSON 的常见误输入）。
+
+成功换到 token 后密码就没用了（MAICA 的 token 是静态凭据、不过期）。**对外分享整合包配置前，
+`maica_account.json` 与两个 sites 文件一样属于必须掏空的东西**。
+
+可选：账号文件里加 `"target_lang": "en"` 切回复语言、`"enable_mt": true` 上传触发器表
+（MTrigger 仍要服务端同键开启才真正生效，见上文）。留空/不写则不改站点已有值。
 
 ## 目前的状态
 
 - ✅ M1 `player_relay`：编译通过，**单人实测通过**
 - ✅ M3a `maica` LLM 站点 + `mtts` TTS 站点：**游戏内实测通过**（v0.2.0，文本+语音）
-- ⚠️ M3b MTrigger 工具调用（v0.3.0）：编译通过，**尚未进游戏实测**
+- ✅ M3b MTrigger 工具调用（v0.3.0）：**游戏内实测通过**（2026-09-17：换模式/好感度/记忆/称呼）
+- ✅ v0.4.0 自动登录：**游戏内实测通过**（2026-09-17；期间揪出「/register 不校验凭据」与
+  「昵称≠登录用户名」两个坑，legality 预校验 + 登录拒绝快速失败均已落地）
+- ⚠️ 编辑器类型保留 mixin（同 jar）：编译通过，**尚未专门验证**（在游戏内站点编辑器里
+  对 maica 条目点一次保存即可验证 api_type 不被洗）
 -  尚未做：情绪→动画
 
 ## 调试
@@ -159,5 +217,10 @@ TLM 服务端: MaicaSite → MaicaClient（不自己联网）
 | `Reference map 'maidllmlocal.refmap.json' ... could not be read` | **无害**。NeoForge 生产用官方映射，refmap 只在开发期有意义；TLM、`maidttslocal`、`conflict_fix` 都不带 refmap |
 | 女仆不回复 / 报连接错误 | 看服务端 `latest.log`。主人离线时会用服务端那份 `url`，服务端没配有效 url 就会失败 |
 | mixin 报错找不到注入点 | TLM 重构了 `LLMOpenAIClient.chat`。这是**有意为之**（`defaultRequire: 1`），比静默失效好 |
+| 自动登录没有任何动静 | 依次检查：① `config/maidllmlocal/maica_account.json` 里 username/password 非空（模板在**开游戏**时生成；没生成=客户端没加载本模组）；② 本机 `llm.json` 的 `maica.secret_key` 是否**已有值**（手工配置优先，模组不插手，需先清空）；③ 换 token 发生在**进世界**那一刻，改完文件要重新进一次世界 |
+| 聊天栏报「MAICA 自动登录失败」 | 后面拼的是服务端原话：密码错 / ToS 未接受 / 邮箱未验证最常见（**register 接口不验证凭据，这类错误现在在 legality 核验这一步就被拦下，不会先假成功后聊天才炸**）。按提示改完账号文件重新进世界即可；同一份错误凭据本会话内不会反复重试 |
+| 「Invalid username/email or password」但密码明明没错 | 后端对标识符是 **SQL 精确等值匹配** `SqlUser.username` 或 `SqlUser.email` 两列之一，**从不匹配 `nickname`**。Flarum 的「显示昵称」和「登录用户名」是两列——填的若是**昵称**（或大小写/拼写与登录名有出入）就会「查无此人」，与密码错同一句话（防枚举）。去论坛资料页确认**登录用户名**，或直接用注册邮箱 |
+| 聊天时报「MAICA 登录被拒 `maica_login_*`」 | WS auth 阶段的拒绝（多见于手工填的 token 属于另一个账号/节点，或账号被 MAS 客户端占用）。v0.4.0 起立即失败并附人话处置建议，不再 30 秒超时吐日志黑话 |
+| 管理员在站点编辑器里保存了 `maica` 站点 | v0.4.0 起类型会被保住（`LLMSiteEditorScreenMixin`）；更早版本里这一手会把 api_type 洗成 `openai`，需从样例配置重建 |
 
 构建见 `BUILD.md`。

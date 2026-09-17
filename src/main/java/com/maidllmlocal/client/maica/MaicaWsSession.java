@@ -135,7 +135,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
         JsonObject auth = new JsonObject();
         auth.addProperty("type", "auth");
         auth.addProperty("access_token", token);
-        auth.addProperty("frontend_id", "maidllmlocal|0.3.0");
+        auth.addProperty("frontend_id", "maidllmlocal|0.4.0");
         send(auth);
 
         // 登录成功依次收 login_id/user/nickname → established → model_anno → 可选 feature_*
@@ -154,6 +154,11 @@ public final class MaicaWsSession implements WebSocket.Listener {
                     env.status(), env.code(), abbreviate(env.content()));
             if (MaicaProtocol.ESTABLISHED.equals(env.status())) {
                 break;
+            }
+            if (MaicaProtocol.LOGIN_REJECT_STATUSES.contains(env.status())) {
+                // 登录拒绝 = established 永远等不到。后端只把它发成 NOTICE（它的循环不崩），
+                // 但我们对玩家必须立刻说人话——不能拿 30 秒超时换一句日志黑话。
+                throw new MaicaAuthReject(env.status(), env.content());
             }
             if (env.severity() == MaicaProtocol.Severity.FATAL) {
                 throw new Exception("MAICA auth failed: " + env.status() + " " + env.content());
@@ -388,5 +393,36 @@ public final class MaicaWsSession implements WebSocket.Listener {
     }
 
     private static final class DeadConnectionException extends Exception {
+    }
+
+    /**
+     * 登录被拒（凭据无效 / 邮箱未验证 / ToS 未接受 / 风控锁定 / 账号被占）。
+     * message 被设计成可直接进聊天气泡：服务端原话 + 玩家下一步动作。
+     */
+    public static final class MaicaAuthReject extends Exception {
+        public final String status;
+
+        public MaicaAuthReject(String status, String content) {
+            super("MAICA 登录被拒 [" + status + "]："
+                    + (content == null || content.isBlank() ? "（服务端未给原因，见日志）" : content)
+                    + authHint(status));
+            this.status = status;
+        }
+
+        private static String authHint(String status) {
+            return switch (status) {
+                case "maica_login_token_invalid", "maica_login_token_corrupted" ->
+                        "。处理：核对 maica_account.json——标识符须是论坛【登录ID】(精确匹配，昵称不算)或注册邮箱，密码须与论坛一致，改后重新进世界";
+                case "maica_login_email_unchecked" ->
+                        "。处理：先去 forum.monika.love 完成邮箱验证";
+                case "maica_login_tos_unaccepted" ->
+                        "。处理：先在 MAICA 论坛接受最新版服务条款";
+                case "maica_login_f2b", "maica_login_banned" ->
+                        "。处理：账号被临时风控，等约 10 分钟后再进世界（别反复重试，会续锁）";
+                case "maica_connection_reuse_denied" ->
+                        "。处理：该 MAICA 账号已被其它连接占用（如 MAS 客户端），先断开那边";
+                default -> "";
+            };
+        }
     }
 }

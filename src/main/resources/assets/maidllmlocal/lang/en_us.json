@@ -1,0 +1,5 @@
+{
+  "maidllmlocal.autologin.ok": "MAICA auto-login succeeded (as %s): token written to local site config, chat away",
+  "maidllmlocal.autologin.failed": "MAICA auto-login failed: %s",
+  "maidllmlocal.autologin.hint": "→ Check config/maidllmlocal/maica_account.json: login accepts the forum ID OR the registration email, but the backend matches exactly (ID is case-sensitive; a nickname is not the login ID); escape quotes/backslashes in JSON (\\\" and \\\\); you can test the same values on the forum.monika.love login page. Re-enter the world after fixing it (identical bad credentials are not retried within one game session, to avoid the fail2ban lockout)"
+}
