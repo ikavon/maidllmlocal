@@ -18,9 +18,11 @@ import java.util.Set;
 /**
  * MTrigger 触发器表的构造与上传（客户端侧，每站点会话创建时一次）。
  *
- * <p>为什么必须预上传：session=-1 下后端<b>静默忽略</b> query 里的临时 trigger 字段
- * （官方节点 2026-09-16 实测），触发器表只能靠 REST {@code POST /trigger} 按 chat_session
- * 预存。我们固定用 -1，所以上传一次即可，配置变更导致会话重建时自然重传。
+ * <p>为什么必须预上传：{@code query} 里的临时 triggers 字段在 session=-1 下到不了
+ * MTrigger 管线（官方节点 2026-09-16 实测），触发器表只能靠 REST {@code POST /trigger}
+ * 按 chat_session 预存。表是<b>按 session 号存</b>的，所以上传的号必须与 query 用的号
+ * 一致——托管模式下就是那个托管号（≥1），否则她那个 session 拿到的是空表，
+ * 后端照跑 MTrigger agent 却无工具可调，表现成"配了 enable_mt 却什么都不发生"。
  *
  * <p>表的内容是本模组支持的三件套：好感度增减 / 长期记忆写回 / 换工作模式。
  * 上传是<b>尽力而为</b>：失败只记日志——没有表的后端不发触发器帧，聊天本身不受影响。
@@ -39,13 +41,16 @@ public final class MaicaTriggerUploader {
      * @param wsUrl            站点 WS 地址，用于推导 REST 基地址
      * @param token            本机 MAICA access_token
      * @param httpBaseOverride 站点 headers 里的 {@code http_base} 覆盖；空串表示推导
+     * @param chatSession      该站点实际使用的会话号（-1 或 0-9）——必须与 query 同号
      */
-    public static void uploadAsync(String wsUrl, String token, String httpBaseOverride) {
+    public static void uploadAsync(String wsUrl, String token, String httpBaseOverride, int chatSession) {
         String httpBase = (httpBaseOverride == null || httpBaseOverride.isEmpty())
                 ? deriveHttpBase(wsUrl) : httpBaseOverride;
         JsonObject body = new JsonObject();
         body.addProperty("access_token", token);
-        body.addProperty("chat_session", "-1"); // 文档：除 content 外均为 str
+        // 文档：除 content 外均为 str。⚠️ -1 这个值别"顺手改成 0"——-1 模式正是靠它拿到
+        // 表的（2026-09-17 实测三项触发器全通过）。REST 文档写的是 0-9，托管号也照抄原值发。
+        body.addProperty("chat_session", String.valueOf(chatSession));
         body.add("content", buildTable());
 
         HttpRequest request;
@@ -118,7 +123,10 @@ public final class MaicaTriggerUploader {
         affection.addProperty("name", "alter_affection");
         table.add(affection);
 
-        // 长期记忆写回：name 同样固定。回传的 memory_item 由前端自存，后端不同步
+        // 长期记忆写回：name 同样固定。回传的 memory_item 由前端自存，后端不同步。
+        // 注意：工具描述在后端硬编码（agent_tools.py MemoryTrigger.to_tool），本表就算加
+        // description 字段也会被静默丢弃（BaseTrigger 没有这个字段）——别想在这里改
+        // 「写什么记忆」的引导，那是 L2 场景措辞（MaicaScene）的职责。
         JsonObject memory = new JsonObject();
         memory.addProperty("template", "memory_writeback_template");
         memory.addProperty("name", "write_memory");

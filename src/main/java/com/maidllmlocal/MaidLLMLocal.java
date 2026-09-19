@@ -13,6 +13,7 @@ import com.maidllmlocal.relay.RelayHub;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -39,6 +40,17 @@ import org.slf4j.Logger;
 public final class MaidLLMLocal {
     public static final String MODID = "maidllmlocal";
     public static final Logger LOGGER = LogUtils.getLogger();
+
+    /**
+     * 模组版本字符串（gradle.properties 的 {@code mod_version}），用于对外的身份标识
+     * ——MAICA 握手的 {@code frontend_id} 是 {@code <type>|<version>} 约定，
+     * 从 mod 元数据取就不必每次发版回来改常量。
+     */
+    public static String version() {
+        return ModList.get().getModContainerById(MODID)
+                .map(container -> container.getModInfo().getVersion().toString())
+                .orElse("unknown");
+    }
 
     public MaidLLMLocal(IEventBus modEventBus) {
         modEventBus.addListener(RegisterPayloadHandlersEvent.class, MaidLLMLocal::onRegisterPayloads);

@@ -55,6 +55,13 @@ public final class MaicaWsSession implements WebSocket.Listener {
     private final String targetLang;
     /** 站点 headers 里的开关：开了才下发 enable_mt 并收集触发器帧。 */
     private final boolean enableMt;
+    /**
+     * -1 = 前端自持上下文（现状默认）；0-9 = 托管会话，后端记历史、开 MFocus/存档 RAG。
+     * 托管与 -1 的语义差异见 docs/CROSSFRONTEND.md。
+     */
+    private final int chatSession;
+    /** MAS→MC 交接文件读取器；null = 未配置（-1 模式下也用不上）。 */
+    private final MaicaHandoff handoff;
 
     private final BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
     private volatile WebSocket ws;
@@ -65,11 +72,18 @@ public final class MaicaWsSession implements WebSocket.Listener {
         return thread;
     });
 
-    public MaicaWsSession(String wsUrl, String token, String targetLang, boolean enableMt) {
+    public MaicaWsSession(String wsUrl, String token, String targetLang, boolean enableMt,
+                          int chatSession, MaicaHandoff handoff) {
         this.wsUrl = wsUrl;
         this.token = token;
         this.targetLang = targetLang;
         this.enableMt = enableMt;
+        this.chatSession = chatSession;
+        this.handoff = handoff;
+    }
+
+    private boolean hosted() {
+        return chatSession >= 0;
     }
 
     // ---------- 对外 ----------
@@ -82,9 +96,28 @@ public final class MaicaWsSession implements WebSocket.Listener {
         ensureConnected();
         JsonObject payload = new JsonObject();
         payload.addProperty("type", "query");
-        payload.addProperty("chat_session", -1);
-        payload.add("query", JsonParser.parseString(messagesJson).getAsJsonArray());
         payload.addProperty("pprt", true);
+        if (hosted()) {
+            // 托管模式：历史在后端，query 只发本轮用户消息纯文本；
+            // 交接记忆走 savefile 临时注入（后端与持久档合并后参与 RAG）
+            payload.addProperty("chat_session", chatSession);
+            String queryText = extractLastUserText(messagesJson);
+            payload.addProperty("query", queryText);
+            int attached = 0;
+            if (handoff != null && !handoff.isEmpty()) {
+                JsonObject savefile = new JsonObject();
+                savefile.add("mas_player_additions", handoff.additions());
+                payload.add("savefile", savefile);
+                attached = handoff.additions().size();
+            }
+            // 原文进日志——托管模式下这是唯一能看到"她实际收到什么"的地方：
+            // L2 场景包装只改发送副本（TLM 历史里没有），后端存的历史也取不回来。
+            MaidLLMLocal.LOGGER.info("maica query (session={}, handoff additions={}):\n{}",
+                    chatSession, attached, queryText);
+        } else {
+            payload.addProperty("chat_session", -1);
+            payload.add("query", JsonParser.parseString(messagesJson).getAsJsonArray());
+        }
         send(payload);
         try {
             return collectStream(System.currentTimeMillis() + QUERY_TIMEOUT_MS);
@@ -92,6 +125,37 @@ public final class MaicaWsSession implements WebSocket.Listener {
             MaidLLMLocal.LOGGER.info("maica connection dropped mid-round, trying reconn resume");
             return recoverStream();
         }
+    }
+
+    /**
+     * 从 TLM 发来的 OpenAI 消息数组里取最后一条 user 消息的纯文本。
+     * 托管模式下后端自己保管历史与人设，前端数组里只有这一条有发送价值
+     * （场景包装已在服务端并入这条消息正文，见 docs/CROSSFRONTEND.md 的 L2 层）。
+     */
+    private static String extractLastUserText(String messagesJson) {
+        JsonArray messages = JsonParser.parseString(messagesJson).getAsJsonArray();
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            JsonObject message = messages.get(i).getAsJsonObject();
+            if (!"user".equals(message.get("role").getAsString())) {
+                continue;
+            }
+            if (message.get("content").isJsonPrimitive()) {
+                return message.get("content").getAsString();
+            }
+            // content 是数组（vision 形态）：拼出其中的文本段
+            StringBuilder text = new StringBuilder();
+            for (var part : message.getAsJsonArray("content")) {
+                JsonObject piece = part.getAsJsonObject();
+                if (piece.has("text")) {
+                    if (text.length() > 0) {
+                        text.append('\n');
+                    }
+                    text.append(piece.get("text").getAsString());
+                }
+            }
+            return text.toString();
+        }
+        throw new IllegalArgumentException("no user message in TLM history payload");
     }
 
     /** 连接不再使用时断开（站点被删/游戏退出）。 */
@@ -135,7 +199,9 @@ public final class MaicaWsSession implements WebSocket.Listener {
         JsonObject auth = new JsonObject();
         auth.addProperty("type", "auth");
         auth.addProperty("access_token", token);
-        auth.addProperty("frontend_id", "maidllmlocal|0.4.0");
+        // frontend_id 约定是 <type>|<version>（服务端只拿它记日志），版本从 mod 元数据取——
+        // 写死的话每次发版都得记得回来改，漏了后端日志里就一直是旧版本号
+        auth.addProperty("frontend_id", "maidllmlocal|" + MaidLLMLocal.version());
         send(auth);
 
         // 登录成功依次收 login_id/user/nickname → established → model_anno → 可选 feature_*
@@ -179,13 +245,15 @@ public final class MaicaWsSession implements WebSocket.Listener {
             }
         }
 
-        // 下发参数：TLM 场景最小集。enable_mt 跟着站点配置走——关着时后端根本不发触发器帧
+        // 下发参数：TLM 场景最小集。enable_mt 跟着站点配置走——关着时后端根本不发触发器帧。
+        // 托管模式打开 savefile_access（存档 RAG）与 enable_mf（MFocus/每轮现实时间注入）；
+        // 这两者在 -1 下被后端 prompt_writable 总闸屏蔽，开了也白开
         JsonObject chatParams = new JsonObject();
         chatParams.addProperty("stream_output", true);
         chatParams.addProperty("target_lang", targetLang);
-        chatParams.addProperty("savefile_access", false);
+        chatParams.addProperty("savefile_access", hosted());
         chatParams.addProperty("enable_mt", enableMt);
-        chatParams.addProperty("enable_mf", false);
+        chatParams.addProperty("enable_mf", hosted());
         JsonObject params = new JsonObject();
         params.addProperty("type", "params");
         params.add("chat_params", chatParams);

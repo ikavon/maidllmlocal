@@ -1,0 +1,17 @@
+{
+  "maica": {
+    "api_type": "maica",
+    "id": "maica",
+    "icon": "touhou_little_maid:textures/gui/ai_chat/misc.png",
+    "url": "wss://maicadev.monika.love/websocket",
+    "enabled": true,
+    "secret_key": "",
+    "has_thinking_field": false,
+    "headers": {
+      "target_lang": "zh",
+      "chat_session": "1",
+      "enable_mt": "true"
+    },
+    "models": ["daa4"]
+  }
+}

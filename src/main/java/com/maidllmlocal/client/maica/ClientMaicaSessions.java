@@ -3,6 +3,7 @@ package com.maidllmlocal.client.maica;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.site.AvailableSites;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.LLMOpenAISite;
+import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.maica.MaicaSite;
 
 import java.util.Collection;
@@ -21,7 +22,8 @@ public final class ClientMaicaSessions {
     private static final Map<String, Entry> SESSIONS = new ConcurrentHashMap<>();
 
     private record Entry(String wsUrl, String token, String targetLang, boolean enableMt,
-                         String httpBase, MaicaWsSession session) {
+                         String httpBase, int chatSession, String handoffFile,
+                         MaicaWsSession session) {
     }
 
     private ClientMaicaSessions() {
@@ -43,11 +45,22 @@ public final class ClientMaicaSessions {
         boolean enableMt = Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "false"));
         // REST 基地址覆盖（自建节点路径与官方不同时用）；空串 = 从 ws 地址推导
         String httpBase = site.headers().getOrDefault("http_base", "");
+        // 托管会话号：-1（默认）= 前端自持上下文的现状；0-9 = 后端记历史的托管模式
+        int chatSession = -1;
+        try {
+            chatSession = Integer.parseInt(site.headers().getOrDefault("chat_session", "-1").trim());
+        } catch (NumberFormatException bad) {
+            MaidLLMLocal.LOGGER.warn("maica site {} has bad chat_session header, falling back to -1", siteId);
+        }
+        chatSession = Math.max(-1, Math.min(9, chatSession));
+        // MAS 交接文件（handoff.json）绝对路径；空 = 不启用
+        String handoffFile = site.headers().getOrDefault("handoff_file", "").trim();
 
         Entry current = SESSIONS.get(siteId);
         if (current != null && current.wsUrl().equals(site.url())
                 && current.token().equals(site.secretKey()) && current.targetLang().equals(targetLang)
-                && current.enableMt() == enableMt && current.httpBase().equals(httpBase)) {
+                && current.enableMt() == enableMt && current.httpBase().equals(httpBase)
+                && current.chatSession() == chatSession && current.handoffFile().equals(handoffFile)) {
             return current.session();
         }
         // 配置变了（或第一次）：重建。旧会话若还在连着就顺手断掉
@@ -55,11 +68,15 @@ public final class ClientMaicaSessions {
             current.session().close();
         }
         Entry created = new Entry(site.url(), site.secretKey(), targetLang, enableMt, httpBase,
-                new MaicaWsSession(site.url(), site.secretKey(), targetLang, enableMt));
+                chatSession, handoffFile,
+                new MaicaWsSession(site.url(), site.secretKey(), targetLang, enableMt,
+                        chatSession, MaicaHandoff.of(handoffFile)));
         SESSIONS.put(siteId, created);
         if (enableMt) {
-            // session=-1 下后端忽略 query 内联 trigger，只能用预上传的表（官方节点实测）
-            MaicaTriggerUploader.uploadAsync(site.url(), site.secretKey(), httpBase);
+            // 表按 session 号存，上传的号必须与 query 用的号一致（否则托管号下拿到空表、
+            // 表现成"配了 enable_mt 却什么都不发生"）。-1 模式正是靠这张预上传的表——
+            // query 内联的 triggers 在 -1 下到不了管线（官方节点实测）
+            MaicaTriggerUploader.uploadAsync(site.url(), site.secretKey(), httpBase, chatSession);
         }
         return created.session();
     }

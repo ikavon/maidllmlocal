@@ -40,7 +40,11 @@ public class MaicaClient implements LLMClient {
         String messagesJson;
         try {
             List<LLMMessage> history = callback.getMessages();
-            if (enableMt()) {
+            if (hosted()) {
+                // 托管模式：后端丢弃 system（骨架提示词覆盖），人设/记忆/场景全部
+                // 改挂到最后一条 user 消息正文——客户端只取这一条发出（见 CROSSFRONTEND.md L2）
+                history = withSceneWrap(maid, history);
+            } else if (enableMt()) {
                 history = withContextInjection(maid, history);
             }
             // 输入侧展开：MAS 人设卡常带 {player_name}，发出去前换成真名，模型不必再见宏
@@ -102,6 +106,44 @@ public class MaicaClient implements LLMClient {
      */
     private boolean enableMt() {
         return Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "false"));
+    }
+
+    /**
+     * 服务端本机站点 headers 里的 chat_session：≥0 时走托管模式的注入路径。
+     * 注意这是<b>服务端</b>站点的 headers——玩家客户端那份同名配置控制连接行为，
+     * 两边要设成同一个号（设计文档「实验 A/B」）。
+     */
+    private boolean hosted() {
+        try {
+            return Integer.parseInt(site.headers().getOrDefault("chat_session", "-1").trim()) >= 0;
+        } catch (NumberFormatException bad) {
+            return false;
+        }
+    }
+
+    /**
+     * 托管模式的注入：场景事实（{@link MaicaScene}）+ 女仆 NBT 里的长期记忆，
+     * 都并进最后一条 user 消息。只改发送副本，不写回 TLM 历史。
+     */
+    private static List<LLMMessage> withSceneWrap(EntityMaid maid, List<LLMMessage> history) {
+        String memory = MaicaMemory.promptBlock(maid);
+        List<LLMMessage> copy = new ArrayList<>(history.size());
+        boolean wrapped = false;
+        // 倒序找最后一条 user，包好后前面的原样保留（客户端只会取这一条发）
+        for (int i = history.size() - 1; i >= 0; i--) {
+            LLMMessage msg = history.get(i);
+            if (!wrapped && msg.role() == Role.USER) {
+                String text = MaicaScene.wrap(maid, msg.message());
+                if (!memory.isEmpty()) {
+                    text = text + "\n\n" + memory;
+                }
+                copy.add(0, new LLMMessage(msg.role(), text, msg.gameTime()));
+                wrapped = true;
+                continue;
+            }
+            copy.add(0, msg);
+        }
+        return copy;
     }
 
     /**
