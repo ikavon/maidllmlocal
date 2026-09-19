@@ -124,8 +124,9 @@ MTrigger 会改世界状态（好感度写进 TLM 系统、记忆持久化进女
 - **客户端（普通玩家，v0.4.0 起免翻 JSON）**：在 `maica_account.json` 里加 `"enable_mt": true`
   即可——模组会把它并进本机站点 headers（`target_lang` 同理）。**换没换到 token 都生效、密码删了
   也生效**：已有 token 时走独立的 headers 同步步，改完账号文件重新进一次世界即可，不必重取 token。
-  控制：上传触发器表（REST `POST /trigger`——session=-1 下 query 内联的 trigger 字段被后端静默
-  忽略，只能预上传）+ 握手下发 `enable_mt` + 收集触发器帧。
+  控制：上传触发器表（REST `POST /trigger`——session=-1 下 query 内联的 trigger 字段到不了 MTrigger
+  管线，只能预上传；表**按会话号存**，托管模式下上传到托管号，见下）+ 握手下发 `enable_mt`
+  + 收集触发器帧。
 - 只开一端时另一侧日志会有 warn，功能静默降级为纯聊天（服务端没开时客户端别开，否则白付一轮
   MTrigger 后处理的延迟）。
 
@@ -178,6 +179,39 @@ config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模�
 可选：账号文件里加 `"target_lang": "en"` 切回复语言、`"enable_mt": true` 上传触发器表
 （MTrigger 仍要服务端同键开启才真正生效，见上文）。留空/不写则不改站点已有值。
 
+## `chat_session` 托管模式（v0.5.0 新增，实验性）
+
+`maica` 站点的 `headers` 加 `"chat_session": "1"`（`1`-`9`）即把会话交给后端托管：后端自己
+记历史、开 MFocus 与存档 RAG，前端每轮只发这一条用户消息的纯文本。默认的 `-1` 是现状 ——
+历史由 TLM 前端自持、随请求整包发出。
+
+一句话分工：**`-1` 是我们把上下文喂给后端；托管是后端替我们保管上下文。**
+
+| | `-1`（默认） | 托管（`1`-`9`） |
+|---|---|---|
+| query 内容 | 整个 OpenAI 消息数组 | 最后一条 user 的纯文本（含 L2 场景包装） |
+| system 人设 | 我们发的 system 生效 | **后端覆盖**，我们的 system 被丢弃 |
+| savefile / 存档 RAG | 被后端 `prompt_writable` 总闸屏蔽 | 生效 |
+| 现实时间注入（MFocus） | 屏蔽 | 生效 |
+| 聊天内容 | 只留在玩家本机历史里 | **后端持久化**（README 已向玩家披露） |
+
+这个开关的实际用途是**跨前端联动**——让女仆和 MAS 里的莫妮卡是同一个人、共享记忆。
+完整设计、源码实锤与实机结论见 [CROSSFRONTEND.md](CROSSFRONTEND.md)。三处容易踩的：
+
+- **两端都要设，且必须同号**：服务端那份控制「注入与执行」（场景包装
+  [`MaicaScene`](../src/main/java/com/maidllmlocal/maica/MaicaScene.java) + 女仆 NBT 里的长期
+  记忆并进 user 消息）；客户端那份控制「连接行为」（query 怎么发、每轮附不附 savefile）。
+  两头不同号 = 一个人被劈成两半，各聊各的。
+- **人设改挂 user 消息**：托管下 system 会被后端覆盖，所以人设/记忆/场景全部并进最后一条
+  user 正文，客户端只取这一条发出。因此**托管模式下 TLM 人设卡里的话术不生效**，只有
+  场景包装里那句「身处 Minecraft 世界、在这里有一具身体」在替它说话。
+- **MTrigger 的表按会话号存**（v0.5.0 修）：后端的触发器表严格对照 `chat_session` 号，
+  托管会话不会回退用 0 号的表。此前客户端把上传写死成 `-1` 号、且托管时干脆不上传，
+  于是"托管 + `enable_mt`"表现成**什么都没发生**——后端照跑 MTrigger agent，却无工具可调。
+  现在按实际会话号上传。⚠️ 这一处是**源码推断驱动**的修复，尚未进游戏实测。
+
+样例配置：[`tlm_config/llm_site_maica_hosted.json`](../tlm_config/llm_site_maica_hosted.json)。
+
 ## 目前的状态
 
 - ✅ M1 `player_relay`：编译通过，**单人实测通过**
@@ -187,4 +221,7 @@ config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模�
   「昵称≠登录用户名」两个坑，legality 预校验 + 登录拒绝快速失败均已落地）
 - ✅ 编辑器类型保留 mixin（同 jar）：**游戏内实测通过**（2026-09-17，编辑器保存后 api_type 不再被洗）
 - ✅ v0.4.0 账号文件 `enable_mt`/`target_lang` 同步（含删密码后）：**游戏内实测通过**
+- ✅ v0.5.0 `chat_session` 托管模式 + 跨前端联动（场景包装 / 首访标志 / MAS 交接）：
+  **游戏内实测通过**（2026-09-18，实验 A 与实验 B 双双通过、B 定为主路径，措辞经一轮返工；
+  实测构建的版本字符串还是 0.4.0，源码与本题一致。细节见 [CROSSFRONTEND.md](CROSSFRONTEND.md)）
 -  尚未做：情绪→动画

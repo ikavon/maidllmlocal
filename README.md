@@ -24,8 +24,6 @@ MaidLLMLocal 内置了与 MAICA 官方后端直连的站点类型：女仆的聊
 
 ## 有什么用
 
-<!-- 功能列表：与两个「为什么」一一对应，由你填充/调整 -->
-
 - **每玩家独立配置**：女仆用玩家自己的 LLM 账号，而不是服务器的统一配置
 - **直连 MAICA**：聊天 + 官方语音合成（MTTS），语音语气跟随对话情绪
 - **AI 不只是会说**：模型自主决策好感度变化、长期记忆、切换工作模式（MTrigger，需服务端管理员开启）
@@ -53,6 +51,10 @@ MaidLLMLocal 内置了与 MAICA 官方后端直连的站点类型：女仆的聊
 - **想让 MAICA 能根据指令切换工作模式/自主决策好感度变化**：MTrigger 默认关闭，需要服务端管理员在站点配置里加
   `"enable_mt": "true"`，玩家在账号文件里加 `"enable_mt": true`。
 - **要分享整合包**：`maica_account.json` 里有你的账号，务必删掉再分享。
+- **（实验性）想让女仆和 MAS 里的莫妮卡共享记忆**：maica 站点两端都配 `chat_session`（`1`-`9`，
+  与 MAS 同号即同一「她」）即可，不用装额外东西。2026-09-18 已实测通过，但仍属实验性。
+  注意：托管模式下 MAICA 后端会持久化聊天内容，默认的 `-1` 模式不会。
+  原理见 [docs/CROSSFRONTEND.md](docs/CROSSFRONTEND.md)。
 
 更多疑难杂症见 [调试手册](docs/DEBUG.md)。
 
@@ -62,6 +64,7 @@ MaidLLMLocal 内置了与 MAICA 官方后端直连的站点类型：女仆的聊
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | 设计原理：为什么改动这么小、协议细节、权限边界 |
 | [docs/DEBUG.md](docs/DEBUG.md) | 调试手册：各种报错/现象的对照表 |
+| [docs/CROSSFRONTEND.md](docs/CROSSFRONTEND.md) | 跨前端联动设计：MAS ↔ Minecraft 共享记忆（实验性） |
 | [BUILD.md](BUILD.md) | 从源码构建 |
 | [tlm_config/](tlm_config/) | 站点配置样例（管理员参考） |
 
