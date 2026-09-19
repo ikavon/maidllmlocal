@@ -9,7 +9,7 @@
 
 1. **JDK 21**（完整 JDK，要 javac）。本机在这：
    ```
-   C:\Users\FYK\AppData\Roaming\.minecraft\runtime\java-runtime-delta
+   C:\Users\Username\AppData\Roaming\.minecraft\runtime\java-runtime-delta
    ```
    ⚠️ 系统默认 `java` 是 1.8 JRE、gradle 自带的只有 JDK 17，都不够。
 2. **TLM jar 放进 `libs/`**（`compileOnly` 引用，不打包进本 mod）：
@@ -21,7 +21,7 @@
 ## 构建
 
 ```bash
-export JAVA_HOME="C:/Users/FYK/AppData/Roaming/.minecraft/runtime/java-runtime-delta"
+export JAVA_HOME="C:/Users/Username/AppData/Roaming/.minecraft/runtime/java-runtime-delta"
 ./gradlew build
 ```
 产物 `build/libs/maidllmlocal-0.1.0.jar`。首次会下 MC+NeoForge（~1-2GB），之后几十秒。
