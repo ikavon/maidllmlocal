@@ -212,6 +212,64 @@ config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模�
 
 样例配置：[`tlm_config/llm_site_maica_hosted.json`](../tlm_config/llm_site_maica_hosted.json)。
 
+## 玩家免手动②：游戏内设置界面（v0.6.0 新增，待游戏内实测）
+
+`/maidllmlocal set` 打开一个界面，把原先要手改文件的东西搬进来：DCC 账号密码、对话语言、
+MTrigger 开关、会话号，外加一个**状态面板**（本机 token 有无 / 服务端 MTrigger 状态 / 会话号）。
+
+**为什么是独立界面、而不是并进 TLM 的女仆设置页**（三条独立证据，缺一条都还值得犹豫）：
+1. **权限**：TLM 的站点配置只有 OP2 能改（`GameModeUtil.canEditSite`）。并进去 = 只有管理员能配，
+   玩家每换一个服务器都得求人。独立界面管的是**玩家自己那份**，权限自洽。
+2. **作用域**：TLM 那个已有「主人称呼」的页是**每女仆**一份，而 MAICA 账号是**每玩家**一份。
+   两种作用域混在一个视觉上下文里，正是 v0.5.0「站点级 `target_lang` vs 女仆级聊天语言」
+   分叉的成因。
+3. **TLM 没有对应扩展点**：`ILittleMaid` 的 21 个扩展方法里**没有一个**与界面/配置有关；女仆界面的
+   tab 与 AI 设置枢纽都是**硬编码枚举**（加一个 tab 要自己实现整套 MenuType+Container+Screen+
+   服务端分支）；TLM 自己的 `ModConfigSpec` 只有 COMMON/SERVER、**没有 CLIENT**。
+
+**入口是"客户端命令"**（`RegisterClientCommandsEvent`），由此白拿三个性质：**任何服务器都能用**
+（含完全没装本模组的原版服）、**不需要 OP**、命令消息不回传服务端。命令名与主类那个服务端命令
+`/maidllmlocal_debug` **不同根**（同名会冲突）。
+
+**保存与应用**：`MaicaAutoLogin.apply(config)` 是从 `onLogin` 里抽出来的入口——界面点【登录】
+不必重进世界靠的就是它。会话号走 `setSiteHeaders`（**TLM 的站点类没有 `setHeaders`**，只能造新
+对象换回注册表；写盘复用 `patchSiteFile` 的原位改逻辑）。改完**不需要手动失效会话**：
+`ClientMaicaSessions` 的 Entry 缓存键已含 `enableMt`/`chatSession`，下一轮聊天自动重建。
+【保存】与【登录】刻意分开，且**已有 token 时登录不会覆盖它**——免得"点一下登录、失败了、
+原来的 token 也没了"，换账号请先【清除 token】。
+
+### MTrigger 服务端状态同步（同版本）
+
+`enable_mt` 是**双端**语义：服务端那半决定它会不会真的执行触发器（`MaicaClient` 里没开就丢弃
+客户端回传的触发器并打 warn）。玩家看不到服务端那份配置，非常容易"自己开了、服务端没开"——
+表现成白付一轮 MTrigger 后处理延迟且什么都不生效，**连一条提示都没有**。
+
+改法：服务端收到能力上报（`RelayHelloPackage`）后，回一个新包 `RelayCapabilityPackage`
+（站点 id → 服务端该站点的 mt 开关），客户端存进 `ServerMtState`。于是：
+
+- **跟随**：账号文件里 `enable_mt` **留空**（`null`）的玩家自动按服务端值走——从"要配的开"
+  降为"想关才配"（显式 `false` 即 opt-out）；
+- **可见**：状态面板如实写出「服务端：开 / 关 / 不知道」。
+
+**用 optional 注册，所以不破兼容**：registrar 的版本号是**按包逐个比对**的，任一注册包版本不一致
+→ 连接被**直接拒绝**（`NetworkComponentNegotiator` → `multiplayer.disconnect.incompatible`）。
+注册成 `optional()` 的包在协商时"对端没有就摘掉"，于是**老客户端照常进服**（只是收不到这个包，
+行为与加功能前完全一致）——所以这次加包**没有 bump registrar 版本号**。代价是发送前必须问一句
+对端有没有该 channel（`player.connection.hasChannel(...)`，NeoForge 自己的调用姿势见
+`ServerPlayer`），否则抛 `UnsupportedOperationException`。
+
+⚠️ **作用域边界（状态面板里也写着）**：服务端那半只有管理员能改。单人模式两端同进程同文件，
+"改完不重进世界即生效"完全成立；专用服务器上界面只能改玩家这一半。
+状态"不知道"的三种来源：服务端没装本模组、客户端是旧版本、或 ack 还没到（此时**不跟随**，
+保持既有的默认关，绝不凭空打开）。
+
+### 顺带纠正一处早先的判断
+
+`chat_session` 客户端钳制 `[-1,9]`、服务端只判 `>=0`，曾以为这是"两端语义分叉"。细查后确认
+**不构成分叉**：服务端只算一个布尔（决定走不走场景包装），填 `42` 时两边都判为"托管"；
+客户端钳制本身是必要的（MAICA 只接受 `0`-`9`）。真正的问题是"玩家填了手误值却毫无提示"，
+由界面的输入校验解决。服务端那处已留注释钉住结论，免得将来被当成 bug 再"修"一遍。
+
 ## 目前的状态
 
 - ✅ M1 `player_relay`：编译通过，**单人实测通过**
@@ -221,7 +279,39 @@ config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模�
   「昵称≠登录用户名」两个坑，legality 预校验 + 登录拒绝快速失败均已落地）
 - ✅ 编辑器类型保留 mixin（同 jar）：**游戏内实测通过**（2026-09-17，编辑器保存后 api_type 不再被洗）
 - ✅ v0.4.0 账号文件 `enable_mt`/`target_lang` 同步（含删密码后）：**游戏内实测通过**
+- 🚧 v0.6.0 游戏内设置界面（`/maidllmlocal set`）+ MTrigger 服务端状态同步：**编译通过，待游戏内实测**。
+  界面把账号/语言/MTrigger/会话号搬进游戏，附状态面板；同步用**新包 + optional 注册**实现，
+  **不 bump registrar 版本号**（故旧客户端仍可进服）。⚠️ 待验证两点：① 单人模式点【登录】不重进
+  世界能生效；② 老客户端 + 新服务端能正常进服（optional 包未协商）。
 - ✅ v0.5.0 `chat_session` 托管模式 + 跨前端联动（场景包装 / 首访标志 / MAS 交接）：
   **游戏内实测通过**（2026-09-18，实验 A 与实验 B 双双通过、B 定为主路径，措辞经一轮返工；
   实测构建的版本字符串还是 0.4.0，源码与本题一致。细节见 [CROSSFRONTEND.md](CROSSFRONTEND.md)）
--  尚未做：情绪→动画
+- 🚧 情绪→动画（2026-09-19，阶段 1 落码、**待游戏内实测**，代码未提交）：
+  链路定为「情绪标签 → `IMaid.playRouletteAnim()` → 轮盘动画」（服务端调用客户端渲染，
+  不动协议；槽名不限 8 个，可用语义化名）。`MaicaEmotionAnims` 先把 28 情绪粗映射到
+  default 模型 extra1~7 语义动作，`MaicaClient` 摘标签后播；另有 `/maidllmlocal_debug
+  anim|animstop|var|vars` 调试命令（OP，取 16 格内最近女仆）。roamingVars 变量通道已用
+  javap 实锤是 YSM 2.6.5 女仆集成的死代码（`YsmRoamingVarsBridge` 已于 2026-09-20 删除）。
+  称呼对齐（2026-09-20）：玩家名解析改走 `MaicaClient.resolvePlayerName`——TLM 每女仆
+  「主人称呼」（`MaidAIChatSerializable.ownerName`）非空优先于 MC 账号名，消除同 session 下
+  后端 savefile（MAS 称呼）与场景行（MC 名）两个名字并存的认知跳跃。
+  语言优先级（2026-09-20）：TLM 每女仆「聊天语言」（`chatLanguage`，locale 形如 `zh_cn`）
+  非空且归一化为 `zh`/`en` 时，优先于站点 headers 的全局 `target_lang`；不识别的语言降级为不覆盖。
+  下发方式：`MaicaChatRequestPackage` 增列 per-request `targetLang`，客户端 `MaicaWsSession`
+  在发 query 前若期望语言与当前生效值不同则重发 `chat_params`（`reset:false`，不动历史）——
+  target_lang 是会话级参数，而一条连接被多个女仆共用，只能在请求粒度对齐。
+  未验证：MAICA 是否接受会话中途重发 params 改语言（后端离线期间无法确认，列入待实测）。
+  实测观察点：① 气泡与动作同拍；② 付费莫妮卡模型无反应则换 default 模型女仆复测；
+  ③ 时钟修订（09-21）：场景行改「汇率事实 + 相位词」后，现实深夜+游戏正午复测——
+  她应能把两套读数归到两只钟上（不再拿游戏钟点催玩家作息）。见 CROSSFRONTEND.md「时钟修订」。
+  **观察点②的答案（09-22 实测）**：付费莫妮卡模型**会**播轮盘动画（"无反应"的猜测作废）；
+  但它的动作播完**锁定在末帧姿势**不回中性，需要归位。核对官方 CC0 default + 19 个内置模型的
+  `animations/extra.animation.json`：**不写 `loop`** = 播完回默认；`"loop": true` = 循环；
+  `"loop": "hold_on_last_frame"` = **锁末帧**（内置模型里 30 处，作者有意选择）。
+  即**锁定与否是模型侧的创作决定，不是本模组的行为**。**决定：让模型适配代码** —— 自研莫妮卡
+  模型的轮盘槽一律「一次性动作不写 loop（播完自动回中性）、需要保持的表情 `loop:true` 由代码
+  `stopRouletteAnim()` 收尾」，代码侧不写归位逻辑。过渡期第三方锁姿势模型可用
+  `/maidllmlocal_debug animstop` 手动归位。
+  后续：自研模型壳 + 脸部表情动画（眉眼骨骼驱动，脸红/嘴型做薄片 cube 用 scale 0/1 切显隐，
+  无 UV 关键帧可用）；建模拟走 Blockbench + blockbench-mcp-plugin（Agent 直连驱动，
+  本机尚需安装 Blockbench 并加载插件、配 MCP `:3000/bb-mcp`）。
