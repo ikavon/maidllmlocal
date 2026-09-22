@@ -31,11 +31,11 @@ MaidLLMLocal 内置了与 MAICA 官方后端直连的站点类型：女仆的聊
 
 ## 怎么用
 
-### 安装（3 步）
+### 安装与登录dcc
 
 1. 把 jar 丢进 `mods/`（**客户端和服务端都要装**；只有服务端装则行为与原版一致）
 2. 开一次游戏，会在 `config/maidllmlocal/` 生成 `maica_account.json`，填入你的
-   DCC 注册邮箱（或论坛登录用户名）和密码
+   DCC 注册邮箱（或论坛登录用户名）和密码，或者在游戏中输入"/maidllmlocal set"进入配置页
 3. 进世界，聊天栏看到「MAICA 自动登录成功」——给女仆选 MAICA 站点就能聊了
 
 
