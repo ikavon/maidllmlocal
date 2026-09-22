@@ -1,6 +1,7 @@
 package com.maidllmlocal;
 
 import com.maidllmlocal.account.MaicaAccountConfig;
+import com.maidllmlocal.client.ClientCommands;
 import com.maidllmlocal.client.ClientRelayHandler;
 import com.maidllmlocal.client.maica.MaicaAutoLogin;
 import net.neoforged.api.distmarker.Dist;
@@ -30,7 +31,11 @@ public final class MaidLLMLocalClient {
     public MaidLLMLocalClient(IEventBus modEventBus) {
         modEventBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(ClientRelayHandler::onLogin);
+        NeoForge.EVENT_BUS.addListener(ClientRelayHandler::onLogout);
         NeoForge.EVENT_BUS.addListener(MaicaAutoLogin::onLogin);
+        // /maidllmlocal set —— 纯客户端命令（挂在这里而不是主类：主类在专用服务器也加载，
+        // 引用 Minecraft/Screen 会崩）
+        NeoForge.EVENT_BUS.addListener(ClientCommands::register);
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {

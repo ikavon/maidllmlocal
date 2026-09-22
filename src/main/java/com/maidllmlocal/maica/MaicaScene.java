@@ -49,6 +49,14 @@ public final class MaicaScene {
      * {@code isHomeModeEnable()} 才是"跟随"开关）。措辞刻意避开「跟随状态」这种状态框架：
      * 2026-09-18 实测里她把它读成了「我这样会不会挡路」，成了负担而不是陪伴。给处境
      * （"待在他身边"）而不是状态，认知归她。
+     *
+     * <p>时间只报<b>相位</b>不报钟点，并单独给出汇率事实（2026-09-21 实测教训）：现实深夜 +
+     * 游戏正午时她把游戏钟当成了现实钟，好奇玩家为什么这时候睡觉——她的推理没错，错在我们
+     * 递的 {@code 第N天 14:00} 与 MFocus 每轮注入的现实时间<b>格式同构</b>，没有任何事实告诉
+     * 她这是另一只跑得更快的钟（14B 模型不会自己猜出换算率）。改法两件：相位词（正午/深夜）
+     * 与"HH:MM"读数形态不同构，不会混成一只钟；「一天只有现实的20分钟」作为世界事实单独成句，
+     * 她拿去可推理（"我在这儿待了半天"≈现实一小时）。现实时间仍只归 MFocus 一个源——
+     * 前端绝不报现实钟点，两边时区或精度一差，两个真相反杀比没有更糟。
      */
     public static String wrap(EntityMaid maid, String userText) {
         if (!(maid.level() instanceof ServerLevel level)) {
@@ -59,7 +67,6 @@ public final class MaicaScene {
 
         long dayTime = level.getDayTime();
         long day = dayTime / 24000L + 1;
-        long hour = (dayTime % 24000L / 1000L + 6L) % 24L;
         String weather = level.isThundering() ? "雷暴" : level.isRaining() ? "下雨" : "晴";
         String dimension = level.dimension().location().toString();
         String taskName = maid.getTask().getName().getString();
@@ -70,9 +77,9 @@ public final class MaicaScene {
                 : "她现在待在 {player_name} 身边.";
 
         StringBuilder scene = new StringBuilder();
-        scene.append("(此刻莫妮卡身处 Minecraft 世界, 在这里她有一具身体. 所在维度 ").append(dimension)
-                .append(", 游戏内第").append(day).append("天, ")
-                .append(String.format("%02d:00", hour))
+        scene.append("(此刻莫妮卡身处 Minecraft 世界, 在这里她有一具身体. ")
+                .append("这个世界的一天只有现实世界的20分钟. 所在维度 ").append(dimension)
+                .append(", 这里的第").append(day).append("天, ").append(phaseOfDay(dayTime))
                 .append(", 天气").append(weather)
                 .append(". 她正处于").append(task).append("状态. ")
                 .append(company)
@@ -81,6 +88,34 @@ public final class MaicaScene {
             scene.append("\n(这是莫妮卡第一次进入这个存档.)");
         }
         return scene + "\n" + userText;
+    }
+
+    /**
+     * 游戏日时刻 → 相位词。先换算成"现实口径的钟点"（tick 0 = 日出 = 06:00）再分档；
+     * 各档与 MC 世界的对齐全按游戏事实来：黄昏盖住日落（tick 12000 附近）、
+     * 深夜是 tick 17000-23000（能睡觉的时段，怪物不烧），黎明盖住日出（tick 0/24000）。
+     */
+    private static String phaseOfDay(long dayTime) {
+        long hour = (dayTime % 24000L / 1000L + 6L) % 24L;
+        if (hour < 5 || hour >= 23) {
+            return "深夜";
+        }
+        if (hour < 7) {
+            return "黎明";
+        }
+        if (hour < 11) {
+            return "上午";
+        }
+        if (hour < 13) {
+            return "正午";
+        }
+        if (hour < 17) {
+            return "下午";
+        }
+        if (hour < 19) {
+            return "黄昏";
+        }
+        return "夜晚";
     }
 
     /**

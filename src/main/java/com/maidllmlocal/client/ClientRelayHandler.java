@@ -60,6 +60,16 @@ public final class ClientRelayHandler {
     }
 
     /**
+     * 离开世界时清掉服务端下发的 MTrigger 状态。
+     *
+     * <p>不清的话，换到另一个（可能没装本模组的）服务器时，上一个服务器的开关状态会残留，
+     * 让玩家以为自己这半还开着。新的 ack 到了会重新填上。
+     */
+    public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        ServerMtState.clear();
+    }
+
+    /**
      * （重新）上报本机能力。登录时自动调用；自动登录换到 token、把本机站点 enable 之后
      * 也要调一次，否则服务端还以为这台客户端什么都能不了。
      */

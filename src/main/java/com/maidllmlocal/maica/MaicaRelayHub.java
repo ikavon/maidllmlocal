@@ -49,11 +49,13 @@ public final class MaicaRelayHub {
     /**
      * 尝试把这一轮对话改派给女仆主人的客户端。
      *
+     * @param langOverride  本轮语言覆盖（{@code zh}/{@code en}），空串 = 用站点默认 target_lang
      * @return {@code null} 表示<b>不能中继</b>（无主 / 主人不在线 / 客户端没装模组或没配同名 maica 站点），
      *         调用方应直接 {@code onFailure}；非 null 的 future 完成值是客户端聚合好的
      *         回复原文 + 本轮 MTrigger 调用。
      */
-    public static CompletableFuture<MaicaRoundResult> dispatch(EntityMaid maid, String siteId, String messagesJson) {
+    public static CompletableFuture<MaicaRoundResult> dispatch(EntityMaid maid, String siteId, String messagesJson,
+                                                               String langOverride) {
         if (messagesJson == null || messagesJson.isEmpty()) {
             return null;
         }
@@ -76,7 +78,7 @@ public final class MaicaRelayHub {
             }
         }, RELAY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-        PacketDistributor.sendToPlayer(owner, MaicaChatRequestPackage.of(requestId, siteId, messagesJson));
+        PacketDistributor.sendToPlayer(owner, MaicaChatRequestPackage.of(requestId, siteId, messagesJson, langOverride));
         return future;
     }
 

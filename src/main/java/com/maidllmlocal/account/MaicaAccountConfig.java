@@ -1,6 +1,8 @@
 package com.maidllmlocal.account;
 
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.maidllmlocal.MaidLLMLocal;
@@ -75,13 +77,54 @@ public record MaicaAccountConfig(String username, String password,
         return root.has(key) && root.get(key).isJsonPrimitive() ? root.get(key).getAsString() : "";
     }
 
+    /**
+     * 覆盖保存这四项（游戏内设置界面用）。
+     *
+     * <p><b>与 {@link #writeTemplate} 的区别</b>：那个写的是<b>空模板</b>——拿它来保存会把
+     * 玩家刚填的内容清空。这个写的是实参。
+     *
+     * <p><b>原位改</b>：先读回现有对象，只覆盖本模组管的这四个键，文件里其它键（将来新增的、
+     * 或玩家自己留的字段）保持原样。读不回来（文件损坏）则按新文件重建，但记一条 warn——
+     * 不静默吞掉。
+     *
+     * @param targetLang 空串或 {@code null} = 不指定（等同"不改站点 headers"）
+     * @param enableMt   {@code null} = <b>跟随服务端</b>（见 {@code ServerMtState}）；
+     *                   {@code true}/{@code false} = 显式覆盖（{@code false} 即 opt-out）
+     */
+    public static void save(String username, String password,
+                            @Nullable String targetLang, @Nullable Boolean enableMt) throws IOException {
+        Path path = file();
+        Files.createDirectories(path.getParent());
+        JsonObject root = new JsonObject();
+        if (Files.exists(path)) {
+            try {
+                JsonElement parsed = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8));
+                if (parsed.isJsonObject()) {
+                    root = parsed.getAsJsonObject();
+                }
+            } catch (Exception e) {
+                MaidLLMLocal.LOGGER.warn("maidllmlocal: {} 解析失败，按新文件重建（原有内容会丢）", path, e);
+            }
+        }
+        root.addProperty("username", username == null ? "" : username);
+        root.addProperty("password", password == null ? "" : password);
+        root.addProperty("target_lang", targetLang == null ? "" : targetLang.trim());
+        if (enableMt == null) {
+            root.add("enable_mt", JsonNull.INSTANCE);
+        } else {
+            root.addProperty("enable_mt", enableMt);
+        }
+        Files.writeString(path, new GsonBuilder().setPrettyPrinting().create().toJson(root),
+                StandardCharsets.UTF_8);
+    }
+
     private static void writeTemplate(Path path) throws IOException {
         Files.createDirectories(path.getParent());
         JsonObject template = new JsonObject();
         template.addProperty("username", "");
         template.addProperty("password", "");
         template.addProperty("target_lang", "");
-        template.add("enable_mt", com.google.gson.JsonNull.INSTANCE);
+        template.add("enable_mt", JsonNull.INSTANCE);
         Files.writeString(path, new GsonBuilder().setPrettyPrinting().create().toJson(template), StandardCharsets.UTF_8);
     }
 }

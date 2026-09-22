@@ -23,8 +23,11 @@ import java.nio.charset.StandardCharsets;
  * @param siteId        服务端指定的站点 id；客户端按<b>同名</b>站点解析自己的配置
  * @param messagesUtf8  OpenAI 风格 {@code [{"role","content"}, ...]} 的 JSON（UTF-8），
  *                      已按 session=-1 的协议约束裁剪（≤10 条 / ≤16KB，保 system 头）
+ * @param targetLang    本轮的语言覆盖（{@code zh}/{@code en}），空串 = 用站点 headers 的默认值。
+ *                      来源是 TLM 每女仆的「聊天语言」设置——一条连接会被多个女仆共用，
+ *                      语言是 per-maid 的，只能在请求粒度下发
  */
-public record MaicaChatRequestPackage(int requestId, String siteId, byte[] messagesUtf8)
+public record MaicaChatRequestPackage(int requestId, String siteId, byte[] messagesUtf8, String targetLang)
         implements CustomPacketPayload {
 
     /** session=-1 的协议上限就是 16KB，留一倍余量防呆。 */
@@ -37,10 +40,12 @@ public record MaicaChatRequestPackage(int requestId, String siteId, byte[] messa
             ByteBufCodecs.VAR_INT, MaicaChatRequestPackage::requestId,
             ByteBufCodecs.stringUtf8(128), MaicaChatRequestPackage::siteId,
             ByteBufCodecs.byteArray(MAX_MESSAGES_BYTES), MaicaChatRequestPackage::messagesUtf8,
+            ByteBufCodecs.stringUtf8(8), MaicaChatRequestPackage::targetLang,
             MaicaChatRequestPackage::new);
 
-    public static MaicaChatRequestPackage of(int requestId, String siteId, String messagesJson) {
-        return new MaicaChatRequestPackage(requestId, siteId, messagesJson.getBytes(StandardCharsets.UTF_8));
+    public static MaicaChatRequestPackage of(int requestId, String siteId, String messagesJson, String targetLang) {
+        return new MaicaChatRequestPackage(requestId, siteId, messagesJson.getBytes(StandardCharsets.UTF_8),
+                targetLang == null ? "" : targetLang);
     }
 
     public String messagesJson() {

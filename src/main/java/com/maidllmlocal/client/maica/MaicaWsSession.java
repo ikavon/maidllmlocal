@@ -52,7 +52,10 @@ public final class MaicaWsSession implements WebSocket.Listener {
 
     private final String wsUrl;
     private final String token;
+    /** 站点配置的默认 target_lang（headers 或 maica_account.json 下发）。 */
     private final String targetLang;
+    /** 当前会话生效的 target_lang——每轮可能因女仆级语言设置被覆盖（见 {@link #query}）。 */
+    private String activeLang;
     /** 站点 headers 里的开关：开了才下发 enable_mt 并收集触发器帧。 */
     private final boolean enableMt;
     /**
@@ -91,9 +94,18 @@ public final class MaicaWsSession implements WebSocket.Listener {
     /**
      * 跑完一整轮对话，返回聚合文本与本轮的 MTrigger 调用。
      * 全程持锁（MAICA 单工），并发调用会排队而不是互相踩。
+     *
+     * @param langOverride 本轮的语言覆盖（{@code zh}/{@code en}），空串 = 用站点配置的默认 target_lang。
+     *                     语言是 per-maid 的而连接是 per-站点共享的，所以只能在请求粒度重发 params。
      */
-    public synchronized MaicaRoundResult query(String messagesJson) throws Exception {
+    public synchronized MaicaRoundResult query(String messagesJson, String langOverride) throws Exception {
         ensureConnected();
+        // 语言变了就先重发一次 chat_params（reset:false，不动历史）再发 query——MAICA 的
+        // target_lang 是会话级参数，不发就不会生效。同会话多女仆来回切换时按此对齐
+        String desiredLang = (langOverride != null && !langOverride.isEmpty()) ? langOverride : targetLang;
+        if (!desiredLang.equals(activeLang)) {
+            sendChatParams(desiredLang);
+        }
         JsonObject payload = new JsonObject();
         payload.addProperty("type", "query");
         payload.addProperty("pprt", true);
@@ -245,12 +257,25 @@ public final class MaicaWsSession implements WebSocket.Listener {
             }
         }
 
-        // 下发参数：TLM 场景最小集。enable_mt 跟着站点配置走——关着时后端根本不发触发器帧。
-        // 托管模式打开 savefile_access（存档 RAG）与 enable_mf（MFocus/每轮现实时间注入）；
-        // 这两者在 -1 下被后端 prompt_writable 总闸屏蔽，开了也白开
+        sendChatParams(targetLang);
+        drain(DRAIN_BUDGET_MS);
+
+        MaidLLMLocal.LOGGER.info("maica ws established (target_lang={}, handshake warnings: {})",
+                activeLang, warnings.length() == 0 ? "none" : warnings);
+    }
+
+    /**
+     * 下发 chat_params：TLM 场景最小集。enable_mt 跟着站点配置走——关着时后端根本不发触发器帧。
+     * 托管模式打开 savefile_access（存档 RAG）与 enable_mf（MFocus/每轮现实时间注入）；
+     * 这两者在 -1 下被后端 prompt_writable 总闸屏蔽，开了也白开。
+     *
+     * <p>握手时调一次，之后每当本轮语言与当前生效值不同时再调一次（见 {@link #query}）——
+     * target_lang 是会话级参数，per-maid 覆盖只能靠重发 params 生效。
+     */
+    private void sendChatParams(String lang) {
         JsonObject chatParams = new JsonObject();
         chatParams.addProperty("stream_output", true);
-        chatParams.addProperty("target_lang", targetLang);
+        chatParams.addProperty("target_lang", lang);
         chatParams.addProperty("savefile_access", hosted());
         chatParams.addProperty("enable_mt", enableMt);
         chatParams.addProperty("enable_mf", hosted());
@@ -259,10 +284,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
         params.add("chat_params", chatParams);
         params.addProperty("reset", false);
         send(params);
-        drain(DRAIN_BUDGET_MS);
-
-        MaidLLMLocal.LOGGER.info("maica ws established (target_lang={}, handshake warnings: {})",
-                targetLang, warnings.length() == 0 ? "none" : warnings);
+        activeLang = lang;
     }
 
     // ---------- 一轮对话 ----------

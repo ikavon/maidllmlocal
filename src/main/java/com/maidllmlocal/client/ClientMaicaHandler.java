@@ -41,7 +41,7 @@ public final class ClientMaicaHandler {
     private static MaicaChatResponsePackage doQuery(MaicaWsSession session, MaicaChatRequestPackage request) {
         long start = System.currentTimeMillis();
         try {
-            MaicaRoundResult result = session.query(request.messagesJson());
+            MaicaRoundResult result = session.query(request.messagesJson(), request.targetLang());
             MaidLLMLocal.LOGGER.info("maica chat ok: {} chars, {} trigger(s) in {}ms",
                     result.text().length(), result.triggers().size(), System.currentTimeMillis() - start);
             return MaicaChatResponsePackage.success(request.requestId(), result.text(),

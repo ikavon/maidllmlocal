@@ -36,7 +36,9 @@ public class MaicaClient implements LLMClient {
     public void chat(LLMCallback callback) {
         EntityMaid maid = callback.getMaid();
         // 玩家名贯穿三处：输入宏展开、输出占位符替换、write_memory 落盘前清洗
-        String playerName = maid.getOwner() != null ? maid.getOwner().getName().getString() : "";
+        String playerName = resolvePlayerName(maid);
+        // 女仆级语言设置（TLM 聊天语言）优先于站点全局 target_lang；空 = 不覆盖
+        String langOverride = resolveLangOverride(maid);
         String messagesJson;
         try {
             List<LLMMessage> history = callback.getMessages();
@@ -54,7 +56,7 @@ public class MaicaClient implements LLMClient {
             return;
         }
 
-        CompletableFuture<MaicaRoundResult> future = MaicaRelayHub.dispatch(maid, site.id(), messagesJson);
+        CompletableFuture<MaicaRoundResult> future = MaicaRelayHub.dispatch(maid, site.id(), messagesJson, langOverride);
         if (future == null) {
             fail(callback, new RuntimeException(
                     "owner client unavailable for maica site " + site.id()
@@ -74,8 +76,14 @@ public class MaicaClient implements LLMClient {
                 return;
             }
             // 情绪标签摘下后存一笔，TTS 那一轮（拿到的是无标签文本）还能取回主导情绪
-            MaicaEmotionCache.put(text, MaicaText.dominantEmotion(result.text()));
+            String emotion = MaicaText.dominantEmotion(result.text());
+            MaicaEmotionCache.put(text, emotion);
             callback.runOnServerThread(() -> {
+                // 情绪→轮盘动画（阶段 1：借 default 模型 extra 槽验证链路；无映射则不播）
+                String anim = MaicaEmotionAnims.animFor(emotion);
+                if (anim != null) {
+                    maid.playRouletteAnim(anim);
+                }
                 // MTrigger 落地（好感度/记忆/换任务）后再出气泡：文本与动作同一拍呈现
                 if (enableMt()) {
                     MaicaTriggers.apply(maid, result.triggers(), playerName);
@@ -86,6 +94,55 @@ public class MaicaClient implements LLMClient {
                 callback.onSuccess(new ResponseChat(text));
             });
         });
+    }
+
+    /**
+     * 玩家名解析：优先 TLM 女仆 AI 聊天设置里的「主人称呼」（{@code MaidAIChatSerializable.ownerName}，
+     * 按女仆存、GUI 可改），留空才回退主人 MC 账号名。
+     *
+     * <p>为什么要这一层：跨前端同 session 下，后端 savefile 里的 {@code mas_playername} 是
+     * MAS 侧上传的称呼，而场景包装「她现在待在 X 身边」若用 MC 账号名，她的上下文里会同时
+     * 存在两个名字（认知跳跃，2026-09-20 实测出现）。把「主人称呼」设成与 MAS 一致的名字，
+     * 场景行、输出替换、write_memory 清洗三处就全部对齐到同一个称呼——且这是玩家可控的，
+     * 不需要 MC 侧去写后端 savefile。
+     */
+    private static String resolvePlayerName(EntityMaid maid) {
+        try {
+            String ownerName = maid.getAiChatManager().ownerName;
+            if (ownerName != null && !ownerName.isBlank()) {
+                return ownerName.trim();
+            }
+        } catch (Throwable ignored) {
+            // 管理器在任何异常状态下都回退到 MC 账号名，称呼不该成为聊天失败的理由
+        }
+        return maid.getOwner() != null ? maid.getOwner().getName().getString() : "";
+    }
+
+    /**
+     * 女仆级语言覆盖：TLM 女仆 AI 聊天设置里的「聊天语言」（{@code chatLanguage}，
+     * locale 形如 {@code zh_cn}/{@code en_us}）优先于站点 headers 的全局 {@code target_lang}。
+     * 归一化成 MAICA 的 {@code zh}/{@code en}；留空或不认识的语言返回 {@code ""}（不覆盖）。
+     *
+     * <p>典型场景：站点全局 zh，但这只女仆设了 English——她的回复就该用英文，
+     * 不受全局默认影响（2026-09-20 用户实测后定的优先级：女仆设置 > 全局设置）。
+     */
+    private static String resolveLangOverride(EntityMaid maid) {
+        try {
+            String chatLanguage = maid.getAiChatManager().getChatLanguage();
+            if (chatLanguage == null || chatLanguage.isBlank()) {
+                return "";
+            }
+            String lang = chatLanguage.trim().toLowerCase();
+            if (lang.startsWith("zh")) {
+                return "zh";
+            }
+            if (lang.startsWith("en")) {
+                return "en";
+            }
+        } catch (Throwable ignored) {
+            // 管理器异常状态下回退"不覆盖"，语言不该成为聊天失败的理由
+        }
+        return "";
     }
 
     /** 把消息正文里的玩家占位符（[player] / {player_name} 两族）换成真名。只动发送副本。 */
@@ -115,6 +172,10 @@ public class MaicaClient implements LLMClient {
      */
     private boolean hosted() {
         try {
+            // 只判"是否托管"，不关心具体号：号是客户端拿去连 MAICA 的，那边只接受 0-9，
+            // ClientMaicaSessions 会把超范围值钳进 [-1,9]。所以这里**不需要**再钳一次——
+            // 两端对这个布尔的判断在任何输入下都一致（例如 42：客户端用 9、这里也判托管）。
+            // 真正需要防的是玩家填了个手误值却毫无提示，那由设置界面的输入校验负责。
             return Integer.parseInt(site.headers().getOrDefault("chat_session", "-1").trim()) >= 0;
         } catch (NumberFormatException bad) {
             return false;

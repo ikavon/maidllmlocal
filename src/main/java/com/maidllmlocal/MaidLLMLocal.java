@@ -1,11 +1,13 @@
 package com.maidllmlocal;
 
+import com.maidllmlocal.debug.DebugCommands;
 import com.maidllmlocal.maica.MaicaRelayHub;
 import com.maidllmlocal.maica.MttsRelayHub;
 import com.maidllmlocal.network.MaicaChatRequestPackage;
 import com.maidllmlocal.network.MaicaChatResponsePackage;
 import com.maidllmlocal.network.MttsRequestPackage;
 import com.maidllmlocal.network.MttsResponsePackage;
+import com.maidllmlocal.network.RelayCapabilityPackage;
 import com.maidllmlocal.network.RelayHelloPackage;
 import com.maidllmlocal.network.RelayRequestPackage;
 import com.maidllmlocal.network.RelayResponsePackage;
@@ -55,6 +57,7 @@ public final class MaidLLMLocal {
     public MaidLLMLocal(IEventBus modEventBus) {
         modEventBus.addListener(RegisterPayloadHandlersEvent.class, MaidLLMLocal::onRegisterPayloads);
         NeoForge.EVENT_BUS.addListener(MaidLLMLocal::onPlayerLoggedOut);
+        NeoForge.EVENT_BUS.addListener(DebugCommands::register);
     }
 
     private static void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
@@ -74,6 +77,11 @@ public final class MaidLLMLocal {
         registrar.playToClient(MttsRequestPackage.TYPE, MttsRequestPackage.STREAM_CODEC, MttsRequestPackage::handle);
         // C->S：MTTS 合成的音频字节
         registrar.playToServer(MttsResponsePackage.TYPE, MttsResponsePackage.STREAM_CODEC, MttsResponsePackage::handle);
+        // S->C：服务端那份站点配置里哪些开了 MTrigger（RelayHelloPackage 的应答）。
+        // **optional**：老客户端没有这个 channel 也能照常进服（协商时被摘掉），
+        // 所以这次加包**不需要 bump 上面的版本号**。发送侧的守卫见 RelayHelloPackage。
+        registrar.optional().playToClient(RelayCapabilityPackage.TYPE,
+                RelayCapabilityPackage.STREAM_CODEC, RelayCapabilityPackage::handle);
     }
 
     /** 玩家下线要清掉他的中继能力，并把在途请求回退掉，否则女仆会卡在等待气泡上直到超时。 */

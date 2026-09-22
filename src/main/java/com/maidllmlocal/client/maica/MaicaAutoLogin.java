@@ -16,6 +16,7 @@ import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.account.MaicaAccountConfig;
 import com.maidllmlocal.account.MaicaAuthClient;
 import com.maidllmlocal.client.ClientRelayHandler;
+import com.maidllmlocal.client.ServerMtState;
 import com.maidllmlocal.maica.MaicaSite;
 import com.maidllmlocal.maica.MttsSite;
 import com.mojang.serialization.JsonOps;
@@ -78,7 +79,25 @@ public final class MaicaAutoLogin {
     private MaicaAutoLogin() {
     }
 
+    /** 进世界时：从磁盘读配置，交给 {@link #apply}。 */
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn event) {
+        MaicaAccountConfig config = MaicaAccountConfig.readOrTemplate();
+        if (config == null) {
+            return;
+        }
+        apply(config);
+    }
+
+    /**
+     * 应用一份配置：已有 token 就只同步 headers，没有就走登录换 token。
+     *
+     * <p><b>必须主线程调用</b> —— 开头要读 {@code AvailableSites} 的站点表（普通
+     * {@code LinkedHashMap}，非线程安全），后面还要替换站点对象。
+     *
+     * <p>公开出来是给<b>游戏内设置界面</b>用的：界面上点【登录】不必重进世界，靠的就是这条路。
+     * 与 {@link #onLogin} 的唯一区别是配置来自参数（界面里的内存值）而不是磁盘。
+     */
+    public static void apply(MaicaAccountConfig config) {
         Minecraft minecraft = Minecraft.getInstance();
         // 主线程上把所有对 AvailableSites（普通 LinkedHashMap，非线程安全）的读做完，
         // 后台只碰这些快照与网络/磁盘。
@@ -86,10 +105,6 @@ public final class MaicaAutoLogin {
             return; // 理论不发生：注册的 serializer 必然带出 defaultSite（见类注释）
         }
         TTSSite rawTts = AvailableSites.TTS_SITES.get(MttsSite.API_TYPE);
-        MaicaAccountConfig config = MaicaAccountConfig.readOrTemplate();
-        if (config == null) {
-            return;
-        }
         if (!llmSite.secretKey().isEmpty()) {
             // 已有 token（自动登录的成果或手工配置）→ 不碰登录，但账号文件里显式给出的
             // target_lang/enable_mt 仍要能生效——否则"换到 token 后删密码"的玩家永远同步不了
@@ -107,7 +122,9 @@ public final class MaicaAutoLogin {
         if (fingerprint.equals(LAST_REJECTED.get())) {
             // 必须在 RUNNING 占位之前返回，否则一次跳过会把旗标卡死
             MaidLLMLocal.LOGGER.warn("maica auto login: 同一份凭据本会话已被服务端拒绝过，跳过重试"
-                    + "（省 Fail2Ban 计数）；改完 maica_account.json 再进世界即可重试");
+                    + "（省 Fail2Ban 计数）；改完账号再试即可");
+            // 必须让玩家看见：否则在设置界面点【登录】会毫无反应，比手改文件还困惑
+            tell(Component.translatable("maidllmlocal.screen.login.rejected"), false);
             return;
         }
         if (!RUNNING.compareAndSet(false, true)) {
@@ -128,8 +145,9 @@ public final class MaicaAutoLogin {
                 if (config.targetLang() != null && !config.targetLang().isBlank()) {
                     mergedHeaders.put("target_lang", config.targetLang().trim());
                 }
-                if (config.enableMt() != null) {
-                    mergedHeaders.put("enable_mt", String.valueOf(config.enableMt()));
+                Boolean mt = resolveEnableMt(config, llmSite.id());
+                if (mt != null) {
+                    mergedHeaders.put("enable_mt", String.valueOf(mt));
                 }
                 // 两个新站点对象在主线程外构造（只读快照 + 纯构造器），主线程只做 map 替换
                 MaicaSite newLlm = new MaicaSite(llmSite.id(), llmSite.icon(), llmSite.url(),
@@ -181,24 +199,124 @@ public final class MaicaAutoLogin {
      */
     private static void syncHeadersIfChanged(LLMOpenAISite site, MaicaAccountConfig config) {
         Map<String, String> current = site.headers();
+        Map<String, String> desired = new LinkedHashMap<>();
         String lang = config.targetLang() == null ? "" : config.targetLang().trim();
-        boolean langChanged = !lang.isEmpty() && !lang.equals(current.get("target_lang"));
-        boolean mtChanged = config.enableMt() != null
-                && !String.valueOf(config.enableMt()).equals(current.getOrDefault("enable_mt", "false"));
-        if (!langChanged && !mtChanged) {
+        if (!lang.isEmpty() && !lang.equals(current.get("target_lang"))) {
+            desired.put("target_lang", lang);
+        }
+        Boolean mt = resolveEnableMt(config, site.id());
+        if (mt != null && !String.valueOf(mt).equals(current.getOrDefault("enable_mt", "false"))) {
+            desired.put("enable_mt", String.valueOf(mt));
+        }
+        if (!desired.isEmpty()) {
+            writeSiteHeaders(site, desired);
+        }
+    }
+
+    /**
+     * 某个站点最终该用的 {@code enable_mt}：账号文件显式值 → 服务端跟随 → 不动。
+     *
+     * <ol>
+     *   <li>账号文件<b>显式</b>写了 {@code true}/{@code false} → 用它（{@code false} 就是 opt-out，
+     *       服务端开着也不跟）</li>
+     *   <li>留空（{@code null}）→ 用服务端下发的值（<b>跟随</b>，见 {@link ServerMtState}）</li>
+     *   <li>服务端状态未知（服务端没装本模组 / 旧客户端 / 还没收到 ack）→ {@code null}，
+     *       调用方<b>什么都不写</b>：保持既有的"默认关"，绝不凭空把开关打开</li>
+     * </ol>
+     */
+    private static Boolean resolveEnableMt(MaicaAccountConfig config, String siteId) {
+        if (config.enableMt() != null) {
+            return config.enableMt();
+        }
+        return ServerMtState.get(siteId);
+    }
+
+    /**
+     * 服务端状态到手（或变化）后重跑一次轻量同步。
+     *
+     * <p><b>为什么要重跑</b>：登录时的同步（{@code onLogin}）与这个 ack 是两条独立的时序 ——
+     * ack 要等一个网络往返，多半晚于同步。所以进来时先跟一次、状态到了再跟一次，
+     * 幂等设计下后到者生效即可（代价最多是"进服后第一次聊天仍按旧值"，下一轮自愈）。
+     */
+    public static void onServerStateUpdated() {
+        if (!(AvailableSites.LLM_SITES.get(MaicaSite.API_TYPE) instanceof LLMOpenAISite llmSite)) {
             return;
         }
-        Map<String, String> merged = new LinkedHashMap<>(current);
-        if (langChanged) {
-            merged.put("target_lang", lang);
+        MaicaAccountConfig config = MaicaAccountConfig.readOrTemplate();
+        if (config == null) {
+            return;
         }
-        if (mtChanged) {
-            merged.put("enable_mt", String.valueOf(config.enableMt()));
+        syncHeadersIfChanged(llmSite, config);
+    }
+
+    /** 设置界面用：当前站点 headers 的只读快照（预填 session 等字段）。主线程调用。 */
+    public static Map<String, String> siteHeaders() {
+        return AvailableSites.LLM_SITES.get(MaicaSite.API_TYPE) instanceof LLMOpenAISite site
+                ? Map.copyOf(site.headers()) : Map.of();
+    }
+
+    /**
+     * 设置界面用：合并写入站点 headers（内存 + 本机 llm.json）。主线程调用。
+     *
+     * <p>空白值被忽略（清空某个 header 请用 {@link #clearToken} 那类明确操作，
+     * 免得"输入框空着"被误当成"要删掉这个键"）。
+     */
+    public static void setSiteHeaders(Map<String, String> updates) {
+        if (!(AvailableSites.LLM_SITES.get(MaicaSite.API_TYPE) instanceof LLMOpenAISite llmSite)) {
+            return;
         }
+        Map<String, String> filtered = new LinkedHashMap<>();
+        updates.forEach((k, v) -> {
+            if (v != null && !v.isBlank()) {
+                filtered.put(k, v.trim());
+            }
+        });
+        if (!filtered.isEmpty()) {
+            writeSiteHeaders(llmSite, filtered);
+        }
+    }
+
+    /**
+     * 设置界面用：清除本机 token（退出登录）。LLM 与 TTS 两个站点一起清，
+     * <b>账号文件保留</b> —— 下次点【登录】还能拿回来。
+     *
+     * <p>刻意<b>不</b>清凭据指纹黑名单：那个的存在意义就是别拿同一份错凭据反复撞 auth
+     * （Fail2Ban 计数）；玩家改过账号后指纹自然变化，无需在这里放行。
+     */
+    public static void clearToken() {
+        if (!(AvailableSites.LLM_SITES.get(MaicaSite.API_TYPE) instanceof LLMOpenAISite llmSite)) {
+            return;
+        }
+        MaicaSite cleared = new MaicaSite(llmSite.id(), llmSite.icon(), llmSite.url(),
+                llmSite.enabled(), "", llmSite.hasThinkingField(), llmSite.headers(), llmSite.modelEntries());
+        AvailableSites.LLM_SITES.put(cleared.id(), cleared);
+        Path sitesDir = FMLPaths.CONFIGDIR.get().resolve("touhou_little_maid").resolve("sites");
+        JsonElement llmEntry = encodeSiteEntry(SerializerRegister.getLLMSerializer(cleared.getApiType()), cleared);
+        Util.backgroundExecutor().execute(() -> patchSiteFile(sitesDir.resolve("llm.json"), cleared.id(), llmEntry));
+
+        if (AvailableSites.TTS_SITES.get(MttsSite.API_TYPE) instanceof MttsSite mtts) {
+            MttsSite clearedTts = new MttsSite(mtts.id(), mtts.icon(), mtts.url(), mtts.enabled(), "", mtts.headers());
+            AvailableSites.TTS_SITES.put(clearedTts.id(), clearedTts);
+            JsonElement ttsEntry = encodeSiteEntry(SerializerRegister.getTTSSerializer(clearedTts.getApiType()), clearedTts);
+            Util.backgroundExecutor().execute(() -> patchSiteFile(sitesDir.resolve("tts.json"), clearedTts.id(), ttsEntry));
+        }
+        ClientRelayHandler.resync();
+        MaidLLMLocal.LOGGER.info("maica: 已按玩家要求清除本机 token（账号文件保留）");
+    }
+
+    /**
+     * 改 headers 的<b>唯一姿势</b>：造新站点对象换回注册表 + 原位回写文件。
+     *
+     * <p>TLM 的 {@code LLMOpenAISite} 没有 {@code setHeaders}，只能整个换对象。
+     * 写盘走 {@link #patchSiteFile}（只碰目标站点、headers 合并语义、其他站点一字不动）。
+     */
+    private static void writeSiteHeaders(LLMOpenAISite site, Map<String, String> updates) {
+        Map<String, String> merged = new LinkedHashMap<>(site.headers());
+        merged.putAll(updates);
         MaicaSite synced = new MaicaSite(site.id(), site.icon(), site.url(), site.enabled(),
                 site.secretKey(), site.hasThinkingField(), merged, site.modelEntries());
         AvailableSites.LLM_SITES.put(synced.id(), synced);
-        MaidLLMLocal.LOGGER.info("maica auto login: 按账号文件同步站点 headers {} -> {}", current, merged);
+        MaidLLMLocal.LOGGER.info("maica auto login: 同步站点 headers {} -> {}", site.headers(), merged);
         JsonElement entry = encodeSiteEntry(SerializerRegister.getLLMSerializer(synced.getApiType()), synced);
         Path llmFile = FMLPaths.CONFIGDIR.get()
                 .resolve("touhou_little_maid").resolve("sites").resolve("llm.json");
