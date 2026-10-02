@@ -26,6 +26,15 @@ import java.util.concurrent.CompletableFuture;
  * 原有代码驱动，本类不需要知道它们的存在。
  */
 public class MaicaClient implements LLMClient {
+
+    /**
+     * 情绪→轮盘动画的总开关。<b>临时关闭</b>（0.6.1 起）：自研莫妮卡模型的表情/轮盘
+     * 槽位尚未落地，现在播 extra1~7 只会在模型上出怪动作。
+     * 模型的表情动画做完并部署后改回 {@code true} 即恢复,其余链路不受影响
+     * （情绪照常解析、{@code MaicaEmotionCache} 照常喂 TTS 情绪）。
+     */
+    private static final boolean EMOTION_ANIM_ENABLED = false;
+
     private final MaicaSite site;
 
     public MaicaClient(MaicaSite site) {
@@ -80,9 +89,11 @@ public class MaicaClient implements LLMClient {
             MaicaEmotionCache.put(text, emotion);
             callback.runOnServerThread(() -> {
                 // 情绪→轮盘动画（阶段 1：借 default 模型 extra 槽验证链路；无映射则不播）
-                String anim = MaicaEmotionAnims.animFor(emotion);
-                if (anim != null) {
-                    maid.playRouletteAnim(anim);
+                if (EMOTION_ANIM_ENABLED) {
+                    String anim = MaicaEmotionAnims.animFor(emotion);
+                    if (anim != null) {
+                        maid.playRouletteAnim(anim);
+                    }
                 }
                 // MTrigger 落地（好感度/记忆/换任务）后再出气泡：文本与动作同一拍呈现
                 if (enableMt()) {
