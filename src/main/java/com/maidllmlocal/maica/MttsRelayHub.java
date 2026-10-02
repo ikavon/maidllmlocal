@@ -5,7 +5,7 @@ import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.network.MttsRequestPackage;
 import com.maidllmlocal.relay.RelayHub;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.maidllmlocal.network.NetworkInit;
 
 import java.util.Map;
 import java.util.UUID;
@@ -62,7 +62,7 @@ public final class MttsRelayHub {
             }
         }, RELAY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-        PacketDistributor.sendToPlayer(owner, MttsRequestPackage.of(requestId, siteId, contentJson));
+        NetworkInit.sendToPlayer(owner, MttsRequestPackage.of(requestId, siteId, contentJson));
         return future;
     }
 

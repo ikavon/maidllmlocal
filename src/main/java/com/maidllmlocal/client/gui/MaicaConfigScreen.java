@@ -15,8 +15,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -302,7 +302,9 @@ public class MaicaConfigScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // 1.21 的惯例：super.render 自己会画背景（NeoForge 自己的 ConfigurationScreen 也这么写）
+        // forge 分支差异：1.20.1 的 super.render 不画背景（1.21 才自动画），须显式调用；
+        // 1.20.1 的 renderBackground 只有 GuiGraphics 一参
+        renderBackground(graphics);
         super.render(graphics, mouseX, mouseY, partialTick);
 
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 16, 0xFFFFFF);

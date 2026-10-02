@@ -7,7 +7,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 
 import java.util.Comparator;
 import java.util.Map;

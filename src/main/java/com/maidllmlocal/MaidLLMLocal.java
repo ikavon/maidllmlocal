@@ -3,24 +3,18 @@ package com.maidllmlocal;
 import com.maidllmlocal.debug.DebugCommands;
 import com.maidllmlocal.maica.MaicaRelayHub;
 import com.maidllmlocal.maica.MttsRelayHub;
-import com.maidllmlocal.network.MaicaChatRequestPackage;
-import com.maidllmlocal.network.MaicaChatResponsePackage;
-import com.maidllmlocal.network.MttsRequestPackage;
-import com.maidllmlocal.network.MttsResponsePackage;
-import com.maidllmlocal.network.RelayCapabilityPackage;
-import com.maidllmlocal.network.RelayHelloPackage;
-import com.maidllmlocal.network.RelayRequestPackage;
-import com.maidllmlocal.network.RelayResponsePackage;
+import com.maidllmlocal.network.NetworkInit;
 import com.maidllmlocal.relay.RelayHub;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
 /**
@@ -37,6 +31,11 @@ import org.slf4j.Logger;
  * 再用一个 mixin 把 {@code LLMOpenAIClient.chat()} 里那一次 {@code sendAsync} 换成"发给主人客户端"。
  * TLM 原有的响应解析、工具循环、气泡、TTS 全部零改动照跑；主人不可用或客户端没同意时直接走原路径，
  * 即服务端自己那份配置生效。
+ *
+ * <h2>forge 分支入口差异</h2>
+ * Forge 的 {@code @Mod} 没有 {@code dist} 参数（NeoForge 专属）——客户端入口改为构造期
+ * 按 {@link FMLEnvironment#dist} 分流到 {@link MaidLLMLocalClient#register}。
+ * 网络注册也从 PayloadRegistrar 事件换成 {@link NetworkInit}（SimpleChannel，构造期直接完成）。
  */
 @Mod(MaidLLMLocal.MODID)
 public final class MaidLLMLocal {
@@ -54,34 +53,20 @@ public final class MaidLLMLocal {
                 .orElse("unknown");
     }
 
-    public MaidLLMLocal(IEventBus modEventBus) {
-        modEventBus.addListener(RegisterPayloadHandlersEvent.class, MaidLLMLocal::onRegisterPayloads);
-        NeoForge.EVENT_BUS.addListener(MaidLLMLocal::onPlayerLoggedOut);
-        NeoForge.EVENT_BUS.addListener(DebugCommands::register);
-    }
+    public MaidLLMLocal(FMLJavaModLoadingContext context) {
+        IEventBus modEventBus = context.getModEventBus();
 
-    private static void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
-        // 1.1.0：MaicaChatResponsePackage 增加 triggersUtf8 字段（MTrigger 回传）
-        PayloadRegistrar registrar = event.registrar("1.1.0");
-        // S->C：请用你本机的配置把这份请求发出去
-        registrar.playToClient(RelayRequestPackage.TYPE, RelayRequestPackage.STREAM_CODEC, RelayRequestPackage::handle);
-        // C->S：本机那次请求的结果
-        registrar.playToServer(RelayResponsePackage.TYPE, RelayResponsePackage.STREAM_CODEC, RelayResponsePackage::handle);
-        // C->S：登录时的能力/同意声明
-        registrar.playToServer(RelayHelloPackage.TYPE, RelayHelloPackage.STREAM_CODEC, RelayHelloPackage::handle);
-        // S->C：请用你本机的 MAICA 账号跑这一轮对话
-        registrar.playToClient(MaicaChatRequestPackage.TYPE, MaicaChatRequestPackage.STREAM_CODEC, MaicaChatRequestPackage::handle);
-        // C->S：这一轮 MAICA 对话的结果
-        registrar.playToServer(MaicaChatResponsePackage.TYPE, MaicaChatResponsePackage.STREAM_CODEC, MaicaChatResponsePackage::handle);
-        // S->C：请用你本机的 MTTS 配置合成这段语音
-        registrar.playToClient(MttsRequestPackage.TYPE, MttsRequestPackage.STREAM_CODEC, MttsRequestPackage::handle);
-        // C->S：MTTS 合成的音频字节
-        registrar.playToServer(MttsResponsePackage.TYPE, MttsResponsePackage.STREAM_CODEC, MttsResponsePackage::handle);
-        // S->C：服务端那份站点配置里哪些开了 MTrigger（RelayHelloPackage 的应答）。
-        // **optional**：老客户端没有这个 channel 也能照常进服（协商时被摘掉），
-        // 所以这次加包**不需要 bump 上面的版本号**。发送侧的守卫见 RelayHelloPackage。
-        registrar.optional().playToClient(RelayCapabilityPackage.TYPE,
-                RelayCapabilityPackage.STREAM_CODEC, RelayCapabilityPackage::handle);
+        // SimpleChannel 注册必须在登录协商开始前完成，mod 构造期最稳
+        NetworkInit.init();
+
+        MinecraftForge.EVENT_BUS.addListener(MaidLLMLocal::onPlayerLoggedOut);
+        MinecraftForge.EVENT_BUS.addListener(DebugCommands::register);
+
+        // 客户端入口：只在物理客户端执行。分支不在专用服务器上走进 if 体，
+        // MaidLLMLocalClient（及其牵出的 Minecraft/Screen 类）也就不会被类加载。
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            MaidLLMLocalClient.register(modEventBus);
+        }
     }
 
     /** 玩家下线要清掉他的中继能力，并把在途请求回退掉，否则女仆会卡在等待气泡上直到超时。 */
@@ -90,6 +75,7 @@ public final class MaidLLMLocal {
             RelayHub.onPlayerGone(player);
             MaicaRelayHub.onPlayerGone(player);
             MttsRelayHub.onPlayerGone(player);
+            NetworkInit.clearPlayer(player.getUUID()); // 在途分片流一并丢弃
         }
     }
 }

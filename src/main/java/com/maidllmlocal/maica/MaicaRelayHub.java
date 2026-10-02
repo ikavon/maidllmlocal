@@ -5,7 +5,7 @@ import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.network.MaicaChatRequestPackage;
 import com.maidllmlocal.relay.RelayHub;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.maidllmlocal.network.NetworkInit;
 
 import java.util.Map;
 import java.util.UUID;
@@ -78,7 +78,7 @@ public final class MaicaRelayHub {
             }
         }, RELAY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-        PacketDistributor.sendToPlayer(owner, MaicaChatRequestPackage.of(requestId, siteId, messagesJson, langOverride));
+        NetworkInit.sendToPlayer(owner, MaicaChatRequestPackage.of(requestId, siteId, messagesJson, langOverride));
         return future;
     }
 

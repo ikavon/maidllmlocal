@@ -9,9 +9,9 @@ import com.maidllmlocal.network.MaicaChatRequestPackage;
 import com.maidllmlocal.network.MaicaChatResponsePackage;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import com.maidllmlocal.network.NetworkInit;
 
 /**
  * 客户端侧：收到服务端的 MAICA 对话请求后，用<b>本机的 MAICA 账号</b>跑完这一轮，把文本回传。
@@ -62,7 +62,7 @@ public final class ClientMaicaHandler {
         // 发包要回客户端主线程
         minecraft.execute(() -> {
             try {
-                PacketDistributor.sendToServer(response);
+                NetworkInit.sendToServer(response);
             } catch (Throwable t) {
                 MaidLLMLocal.LOGGER.warn("failed to send maica response back", t);
             }

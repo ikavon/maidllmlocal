@@ -1,10 +1,8 @@
 package com.maidllmlocal.maica;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import javax.annotation.Nullable;
@@ -134,7 +132,7 @@ public final class MaicaScene {
         /** 键 = 主人 UUID。只存"来过"，没来过就不在表里。 */
         private final Map<UUID, Boolean> visited = new HashMap<>();
 
-        static VisitTracker load(CompoundTag tag, HolderLookup.Provider registries) {
+        static VisitTracker load(CompoundTag tag) {
             VisitTracker tracker = new VisitTracker();
             CompoundTag visits = tag.getCompound("visits");
             for (String key : visits.getAllKeys()) {
@@ -148,7 +146,7 @@ public final class MaicaScene {
         }
 
         @Override
-        public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+        public CompoundTag save(CompoundTag tag) {
             CompoundTag visits = new CompoundTag();
             for (UUID owner : visited.keySet()) {
                 visits.putBoolean(owner.toString(), true);
@@ -161,7 +159,7 @@ public final class MaicaScene {
         static boolean markVisitedIfFirst(ServerLevel level, @Nullable UUID owner) {
             UUID key = owner == null ? NO_OWNER : owner;
             VisitTracker tracker = level.getServer().overworld().getDataStorage()
-                    .computeIfAbsent(new Factory<>(VisitTracker::new, VisitTracker::load, DataFixTypes.LEVEL), ID);
+                    .computeIfAbsent(VisitTracker::load, VisitTracker::new, ID); // 1.20.1 签名:loader 在前、工厂在后
             if (tracker.visited.containsKey(key)) {
                 return false;
             }

@@ -10,10 +10,10 @@ import com.maidllmlocal.network.RelayResponsePackage;
 import com.maidllmlocal.relay.RelaySite;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import com.maidllmlocal.network.NetworkInit;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -78,7 +78,7 @@ public final class ClientRelayHandler {
             return;
         }
         Set<String> ids = localRelaySiteIds();
-        PacketDistributor.sendToServer(RelayHelloPackage.of(ids));
+        NetworkInit.sendToServer(RelayHelloPackage.of(ids));
         MaidLLMLocal.LOGGER.info("announced {} relay-capable local site(s): {}", ids.size(), ids);
     }
 
@@ -169,7 +169,7 @@ public final class ClientRelayHandler {
         // 发包要回客户端主线程
         minecraft.execute(() -> {
             try {
-                PacketDistributor.sendToServer(response);
+                NetworkInit.sendToServer(response);
             } catch (Throwable t) {
                 MaidLLMLocal.LOGGER.warn("failed to send relay response back", t);
             }

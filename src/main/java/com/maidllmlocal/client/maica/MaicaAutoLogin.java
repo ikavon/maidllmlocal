@@ -23,10 +23,10 @@ import com.mojang.serialization.JsonOps;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.fml.loading.FMLPaths;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

@@ -38,7 +38,9 @@ import java.util.concurrent.CompletableFuture;
  * mixin 配置用 {@code defaultRequire: 1}：TLM 若重构 {@code chat()} 导致 redirect 目标找不到，
  * 游戏会<b>明确报错</b>而不是悄悄退化成"不中继"。
  */
-@Mixin(LLMOpenAIClient.class)
+// remap=false：本 mixin 的目标全是 TLM 自有方法与 JDK 类（HttpRequest/HttpClient），
+// 没有需要 mojmap→SRG 翻译的 MC 成员；不加它 mixin AP 会因找不到混淆映射而报错
+@Mixin(value = LLMOpenAIClient.class, remap = false)
 public abstract class LLMOpenAIClientMixin {
 
     @Shadow

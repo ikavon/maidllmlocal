@@ -4,7 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.network.RelayRequestPackage;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
+import com.maidllmlocal.network.NetworkInit;
 
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -140,7 +140,7 @@ public final class RelayHub {
             }
         }, RELAY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-        PacketDistributor.sendToPlayer(owner, RelayRequestPackage.of(requestId, siteId, bodyJson));
+        NetworkInit.sendToPlayer(owner, RelayRequestPackage.of(requestId, siteId, bodyJson));
         return future;
     }
 

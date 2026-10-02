@@ -6,7 +6,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.maidllmlocal.MaidLLMLocal;
-import net.neoforged.fml.loading.FMLPaths;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
