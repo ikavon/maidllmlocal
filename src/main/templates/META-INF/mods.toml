@@ -1,0 +1,46 @@
+# Forge 1.20.1 的 mods.toml（main 分支对应文件是 neoforge.mods.toml，格式有差：
+# 这边用 mandatory=true 而不是 type="required"，字段名以 47.4.16 官方 MDK 为准）。
+modLoader="javafml" #mandatory
+
+# FML 版本（Forge 大版本号），非 mod 自身版本
+loaderVersion="${loader_version_range}" #mandatory
+
+license="${mod_license}"
+
+[[mods]] #mandatory
+
+modId="${mod_id}" #mandatory
+
+version="${mod_version}" #mandatory
+
+displayName="${mod_name}" #mandatory
+
+authors="${mod_authors}" #optional
+
+description='''${mod_description}'''
+
+# The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
+[[mixins]]
+config="${mod_id}.mixins.json"
+
+[[dependencies.${mod_id}]] #optional
+    modId="forge" #mandatory
+    mandatory=true #mandatory
+    versionRange="${forge_version_range}" #mandatory
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# Required: 本 mod 的 mixin 目标是 TLM 的类，需 TLM 存在；BEFORE = 本 mod(含 mixin 配置)先于 TLM 加载
+[[dependencies.${mod_id}]]
+    modId="touhou_little_maid"
+    mandatory=true
+    versionRange="[1.5.3,)"
+    ordering="BEFORE"
+    side="BOTH"

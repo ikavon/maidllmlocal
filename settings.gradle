@@ -1,9 +1,18 @@
 pluginManagement {
     repositories {
         gradlePluginPortal()
+        maven {
+            name = 'MinecraftForge'
+            url = 'https://maven.minecraftforge.net/'
+        }
+        // MixinGradle（org.spongepowered.mixin）不在 Gradle 插件门户，只在 Sponge 自己的仓库
+        maven {
+            name = 'Sponge'
+            url = 'https://repo.spongepowered.org/maven'
+        }
     }
 }
 
 plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
 }
