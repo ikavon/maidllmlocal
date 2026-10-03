@@ -1,6 +1,7 @@
 # MaidLLMLocal — 构建与部署
 
 > 运行时调试表见 [docs/DEBUG.md](docs/DEBUG.md)；设计原理见 [docs/DESIGN.md](docs/DESIGN.md)。
+> ⚠️ forge-1.20 分支的构建/部署与本文不同（JDK 17、产物 `-all.jar`、两端同装），见 [docs/BUILD-FORGE.md](docs/BUILD-FORGE.md)。
 
 把 TLM(车万女仆) 的 **LLM 通道**从「服务端发 HTTP」改成「把请求发给女仆主人的客户端，客户端用自己的配置发出去」。
 和 `maidttslocal` 解决 TTS 的思路同源，两者叠加即「每玩家完整的本机 LLM + TTS」。
