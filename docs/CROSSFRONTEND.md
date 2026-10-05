@@ -121,6 +121,33 @@ DDLC 中知道自己是游戏角色的 canon 认知一致。MAICA 骨架的原�
   `context` / `target_lang` / `timestamp` / `preserved`；`context` 里的
   `known_info.persistent_acquire` 能看到后端**这一轮实际检索到了什么**——
   排查召回问题时这是最直接的一手证据。
+
+- **这个文件只能读，不能改后回灌——已用对照实验定论。** 头部那个 256 字节块是后端对
+  历史内容签的**签名**（256 字节 = RSA-2048 尺寸），`PUT /history` 会校验。
+  2026-10-06 直接调 REST 做三组对照（MAS 按钮走的就是同一个 `PUT /history`）：
+
+  | 上传内容 | 结果 |
+  |---|---|
+  | 刚取到的 `[blob, 75 轮]` 原样回灌 | **`success: true`** |
+  | 同一 blob + 截断到 63 轮 | `400 Sign does not match` |
+  | **重新取** blob + 截断到 63 轮 | `400 Sign does not match` |
+
+  三组都排除了 blob 陈旧这个变量，结论是确定的：**签名覆盖内容，只有改动才被拒。**
+  所以「编辑导出文件、修掉几轮噪声、再上传」这条路被后端有意封死。MAS 的
+  Upload 按钮本身是**好使的**（原样回灌成功），它是一个**往返/备份还原**设施，
+  不是编辑设施——这跟「存档只有上传/删除接口、没有下载接口」的设计自洽：
+  下发时签名，接收时验签，客户端无法伪造或篡改托管历史。
+  要清理会话内容只能走真·会话重置（`reset_chat_session()` →
+  `{type: query, chat_session: N, reset: True}`，MAS 里有对应按钮），
+  代价是整段历史一起清。
+  ⚠️ blob 每次 `GET /history` 都不同（内容没变也变），说明是非确定性签名或内含 nonce；
+  它不是历史的一部分，上传时保持最后一次取回的那个即可。
+- ⚠️ `GET /history` 的载荷要走 **query 参数**，`requests.get(url, json=...)` 的 body
+  会被吞掉、后端回 `Query parsing failed`。POST/PUT 用 `json=` 正常。
+  `content` 字段支持部分拉取：正整数 N = 前 N 轮，负整数 -N = 后 N 轮，0 = 全部
+  （无论哪种，首项都是当前生效的 system）。这是排查召回问题时的便利工具。
+- 被裁进 archive 的轮次并非彻底消失——`memory_concl` / RAG 仍可能重新检索到。
+  所以「等窗口滑动把它挤出去」只能让它离开**活跃窗口**，不等于从她的长期记忆里清除。
 - 历史里 `target_lang` 跟的是**消息/输出语言**而非请求参数（MAS 轮全 `en`、MC 轮全
   `zh`，因为 L2 场景包装是中文）；要判断参数是否生效，看 `context.known_info`
   里是否出现 `persistent_acquire`（savefile RAG）与 `search_internet`（MFocus）。
