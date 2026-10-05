@@ -89,27 +89,64 @@ DDLC 中知道自己是游戏角色的 canon 认知一致。MAICA 骨架的原�
 - 成本：每轮输入 ≈ 窗口占用（MAS 重度用户窗口常顶满）；两端话题交织有
   串戏风险；首 token 延迟随输入变长。
 
-### ⚠️ 前端必须同步 params 回执（2026-10-05 踩到）
+### 前端与 params 回执同步（2026-10-05）
 
 - MAS 的 `MAICASettingSendTasker` 把 `maica_params_accepted` 当**阻塞点**
   （`except_ws_status=['maica_params_accepted']`），首条 query 一定在参数生效之后。
-  maidllmlocal 之前用固定时长 `drain(DRAIN_BUDGET_MS)` 猜时机，query 完全可能抢在
-  参数落地前出门——那几轮就跑在后端默认参数上（`savefile_access` /
-  `session_len_limit` / `enable_mf` 全未生效）。09-21 的 1.21.1 联调没暴露，因为
-  当时窗口没满、缺的字段恰好有可用的默认值。
-- **MC 的 chat_params 必须发满 MAS 的全集**，最关键是 `session_len_limit`：它决定后端
-  给这个会话留多少历史预算，缺省就等于不留。跨前端共享同一 session 时两端必须同值，
-  后写的覆盖先写的切片点——MAS 恒为 8192，MC 现已对齐。
+  maidllmlocal 之前用固定时长 `drain(DRAIN_BUDGET_MS)` 猜时机；现已改为阻塞等回执
+  （超时只告警不抛）。这是协议一致性改进——**事后用 MAS 的历史导出验证，它并不是
+  当时症状的原因**：`drain` 的 5s 比回执的 1~2s 宽裕，且导出里 MC 那几轮的
+  `persistent_acquire`（savefile RAG）与 `search_internet`（MFocus）都在，参数早就生效了。
+- **MC 的 chat_params 与 MAS 对齐**（含 `session_len_limit`，MAS 恒为 8192）。后端
+  默认值也是 8192，所以缺该字段与同值行为一致——它不是「写入不落地」的原因，
+  只是让两端行为显式相同。跨前端共享同一 session 时两端仍应同值，因为后写的会覆盖
+  先写的切片点。
 - **同一账号同一时刻只允许一条 established 连接**（后端回
   `maica_connection_reuse_attempt(300) "A connection was established already"`）。
   被挡住的连接发 query 只回 `maica_worker_loop_finished`，**连 `maica_mcore_gen_start`
   都没有，query 被整个丢掉且不报错**。这意味着 MAS 和 MC 从来没法「同时在线」验证
   互通，只能靠先后顺序（一端退出，另一端再进）。
-- ⚠️ 非聊天任务（如角色卡生成）不要走共享 session：它会占掉窗口额度、污染她的上下文。
-  2026-10-05 实测就发生了一次——一条「Generate a character profile for …」的提示词被送进
-  session 1，而那条会话正被 MAS 当成长期记忆载体用。这类一次性任务应改走 -1（前端自持
-  上下文、后端不留历史），但 -1 会丢掉 MTrigger，所以得权衡：要么单独占用一个不承载
-  记忆的 session 号，要么给这类任务临时切 -1。
+
+### ⚠️ 验证跨前端记忆的可靠方法（2026-10-05）
+
+不要靠「问她记不记得」来判定管线是否通畅，也不要靠 RAG 检索是否命中——两条都会骗人。
+
+- **RAG 是按查询相关性取 top-k 的，不是全量。** 同一条存档记忆，问她
+  「你还记得我什么」可能命中一条无关的条目，而问具体的名字才会命中名字那条。
+  **检索未命中 ≠ 记忆不存在。**
+- **判定写入是否落地的唯一硬证据是后端历史本身**：MAS 的
+  `chat_history.txt` 导出（`game/Submods/MAICA_ChatSubmod/chat_history.txt`）就是
+  后端托管会话的全量历史。MC 发过的轮次若在里面，管线就是通的。
+  该文件形如 `[<256 字节 base64 块>, [轮次...]]`，每轮为 `{content, role}` 或带
+  `context` / `target_lang` / `timestamp` / `preserved`；`context` 里的
+  `known_info.persistent_acquire` 能看到后端**这一轮实际检索到了什么**——
+  排查召回问题时这是最直接的一手证据。
+- 历史里 `target_lang` 跟的是**消息/输出语言**而非请求参数（MAS 轮全 `en`、MC 轮全
+  `zh`，因为 L2 场景包装是中文）；要判断参数是否生效，看 `context.known_info`
+  里是否出现 `persistent_acquire`（savefile RAG）与 `search_internet`（MFocus）。
+- **窗口账要先算。** `session_len_limit` 是 token 上限，保留**最近**的整轮。
+  若目标轮次距当前不足上限，就说明它们在上下文里——那时「她没想起来」是模型侧
+  召回质量，不是管线问题。09-21 那次 MC 段仅约 2.5k token，在 8192 窗口内，
+  她答「不记得」时原文就在眼前；那段内容本身也薄（场景模板 + 一句问候）。
+
+### ⚠️ 称呼对齐：必须填 TLM「主人称呼」（2026-10-05 实测）
+
+MC 的 L2 场景包装写「她现在待在 {player_name} 身边」，`resolvePlayerName` 优先取
+TLM 女仆 AI 聊天设置里的**「主人称呼」**（`ownerName`），留空才回退**主人的 MC
+账号名**。跨前端同 session 下，MAS 侧的称呼存在后端存档的 `mas_playername`
+（存档无下载接口，MC 拿不到），所以**必须手动把「主人称呼」设成与 MAS 一致的名字**，
+否则她的上下文里会同时出现两个名字——而且 MC 账号名处在最显眼的位置（场景行）。
+2026-10-05 实测就是这样出问题的：历史里是「她现在待在 <MC gamertag> 身边」，而
+存档记的名字是另一个。设好「主人称呼」后，场景行、输出占位符替换、`write_memory`
+清洗三处同时对齐。
+
+### ⚠️ 非聊天任务不要走共享 session
+
+它会占掉窗口额度、污染她的上下文。2026-10-05 实测就发生了一次——一条
+「Generate a character profile for …」的提示词被送进 session 1，而那条会话正被 MAS
+当成长期记忆载体用（历史里那轮还带着 MFocus 的联网搜索结果）。这类一次性任务应改走
+-1（前端自持上下文、后端不留历史），但 -1 会丢掉 MTrigger，所以得权衡：要么单独占用
+一个不承载记忆的 session 号，要么给这类任务临时切 -1。
 
 ## 设计原则：前端给事实，认知归她
 
