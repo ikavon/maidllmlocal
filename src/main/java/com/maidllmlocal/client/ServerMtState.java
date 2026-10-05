@@ -20,7 +20,7 @@ import java.util.Map;
  * </ul>
  *
  * <p>{@link #get} 返回 {@code null} 表示<b>不知道</b>（服务端没装本模组、包是可选的老客户端、
- * 或尚未收到），此时<b>不跟随</b>——保持既有的"默认关"行为，绝不凭空把开关打开。
+ * 或尚未收到），此时<b>不跟随</b>——header 缺省时走 {@code ClientMaicaSessions} 的默认开。
  *
  * <p>故意<b>不加 {@code @OnlyIn(Dist.CLIENT)}</b>：本类只持有一个 Map、不碰任何客户端专用 API，
  * 而引用它的包处理器在 common 包里（专用服务器上永远走不到），不加注解可以让类加载干净利落。

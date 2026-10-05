@@ -116,7 +116,7 @@ public class MttsSite implements TTSSite {
         @Override
         public MttsSite defaultSite() {
             return new MttsSite(API_TYPE, SerializableSite.defaultIcon(API_TYPE),
-                    "https://maicadev.monika.love/tts", false, "", Map.of());
+                    "https://maicadev.monika.love/tts", true, "", Map.of());
         }
     }
 }

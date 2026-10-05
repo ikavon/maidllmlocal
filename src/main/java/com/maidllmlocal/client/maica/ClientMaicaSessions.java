@@ -41,8 +41,9 @@ public final class ClientMaicaSessions {
             return null;
         }
         String targetLang = site.headers().getOrDefault("target_lang", "zh");
-        // MTrigger 开关：上传触发器表 + 握手下发 enable_mt + 收集触发器帧，默认关
-        boolean enableMt = Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "false"));
+        // MTrigger 开关：上传触发器表 + 握手下发 enable_mt + 收集触发器帧，默认开
+        // （装本模组就是为这套功能来的；想关的在设置界面/账号文件里显式关）
+        boolean enableMt = Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "true"));
         // REST 基地址覆盖（自建节点路径与官方不同时用）；空串 = 从 ws 地址推导
         String httpBase = site.headers().getOrDefault("http_base", "");
         // 托管会话号：-1（默认）= 前端自持上下文的现状；0-9 = 后端记历史的托管模式
