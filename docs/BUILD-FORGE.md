@@ -5,7 +5,7 @@
 
 ## 分支定位
 
-- 目标运行时:**AFoP Continue 整合包**(DCC 服务器 `dxs60.chaowan.me:11224` 同款)——
+- 目标运行时:**AFoP Continue 整合包**(DCC 服务器同款,地址见私下渠道)——
   Forge **47.4.16** / MC **1.20.1** / Java **17** / TLM **1.5.3-forge+mc1.20.1**(包内自带,
   与我们编译依赖是同一个文件)。
 - 包内**无 YSM**——本 mod 只硬依赖 TLM(mods.toml),无影响。
@@ -31,7 +31,7 @@ Forge 的 SimpleChannel 在登录握手时**强制两端 channel 集合与协议
 
 1. **服务端 + 主人客户端都必须装**(relay 架构本来如此);
 2. **只装客户端 → 进不去没装本 mod 的服务器**(握手拒绝)。给 AFoP 装 jar 后,
-   在 DCC 服主装服务端之前,**别想用这个实例进 dxs60.chaowan.me**;要进就先移除 jar;
+   在 DCC 服主装服务端之前,**别想用这个实例进 DCC 服**;要进就先移除 jar;
 3. 反之,装了本 mod 的服务器也会**拒绝没装的玩家**——所以公测分发方式是
    「服主装服务端 + 整合包更新给全体玩家带上 jar」,两端同换;
 4. 改任何包结构 → bump `NetworkInit.PROTOCOL_VERSION` → 同样两端同换
