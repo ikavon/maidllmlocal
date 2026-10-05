@@ -253,8 +253,12 @@ public final class MaicaWsSession implements MaicaRawSocket.Listener {
         sendChatParams(targetLang);
         drain(DRAIN_BUDGET_MS);
 
-        MaidLLMLocal.LOGGER.info("maica ws established (target_lang={}, handshake warnings: {})",
-                activeLang, warnings.length() == 0 ? "none" : warnings);
+        // 把会话号打在最显眼的地方：它决定了后端用的是哪份历史，出问题时第一眼就该看这个。
+        // 之前只写在 query 行里，容易被当成"连接通了但记忆丢了"，其实是连的根本不是同一个 session
+        MaidLLMLocal.LOGGER.info(
+                "maica ws established (chat_session={} [{}], target_lang={}, enable_mt={}, handshake warnings: {})",
+                chatSession, hosted() ? "hosted, 后端记历史" : "前端自持上下文, 后端不留历史",
+                activeLang, enableMt, warnings.length() == 0 ? "none" : warnings);
     }
 
     /**
