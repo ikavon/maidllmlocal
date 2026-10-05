@@ -65,7 +65,7 @@ public class MaicaSite extends LLMOpenAISite {
         @Override
         public MaicaSite defaultSite() {
             return new MaicaSite(API_TYPE, SerializableSite.defaultIcon(API_TYPE),
-                    "wss://maicadev.monika.love/websocket", false, "", false,
+                    "wss://maicadev.monika.love/websocket", true, "", false,
                     Map.of("target_lang", "zh"),
                     Map.of("daa4", new LLMOpenAISite.ModelEntry("daa4")));
         }

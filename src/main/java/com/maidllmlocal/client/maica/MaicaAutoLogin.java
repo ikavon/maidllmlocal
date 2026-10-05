@@ -221,7 +221,7 @@ public final class MaicaAutoLogin {
      *       服务端开着也不跟）</li>
      *   <li>留空（{@code null}）→ 用服务端下发的值（<b>跟随</b>，见 {@link ServerMtState}）</li>
      *   <li>服务端状态未知（服务端没装本模组 / 旧客户端 / 还没收到 ack）→ {@code null}，
-     *       调用方<b>什么都不写</b>：保持既有的"默认关"，绝不凭空把开关打开</li>
+     *       调用方<b>什么都不写</b>：header 缺省时按 {@code ClientMaicaSessions} 的默认开走</li>
      * </ol>
      */
     private static Boolean resolveEnableMt(MaicaAccountConfig config, String siteId) {

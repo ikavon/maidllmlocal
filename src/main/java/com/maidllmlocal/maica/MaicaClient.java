@@ -99,7 +99,7 @@ public class MaicaClient implements LLMClient {
                 if (enableMt()) {
                     MaicaTriggers.apply(maid, result.triggers(), playerName);
                 } else if (!result.triggers().isEmpty()) {
-                    MaidLLMLocal.LOGGER.warn("dropped {} maica trigger(s): server-side site {} lacks enable_mt in headers",
+                    MaidLLMLocal.LOGGER.warn("dropped {} maica trigger(s): server-side site {} has enable_mt=false in headers",
                             result.triggers().size(), site.id());
                 }
                 callback.onSuccess(new ResponseChat(text));
@@ -171,9 +171,10 @@ public class MaicaClient implements LLMClient {
     /**
      * 服务端本机站点 headers 里的 MTrigger 开关：控制<b>注入与执行</b>。
      * 客户端那份同名 headers 控制上传与收集——服务器管理员对「AI 动女仆实体」有最终否决权。
+     * 默认开：装这套模组就是为 MTrigger 来的，想关的管理员显式写 "false"。
      */
     private boolean enableMt() {
-        return Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "false"));
+        return Boolean.parseBoolean(site.headers().getOrDefault("enable_mt", "true"));
     }
 
     /**
