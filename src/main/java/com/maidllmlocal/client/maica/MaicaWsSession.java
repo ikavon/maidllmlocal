@@ -7,15 +7,10 @@ import com.maidllmlocal.MaidLLMLocal;
 import com.maidllmlocal.maica.MaicaRoundResult;
 import com.maidllmlocal.maica.MaicaTrigger;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -35,10 +30,10 @@ import java.util.concurrent.TimeUnit;
  *   <li>sping 应用层心跳 30s（静默，服务端不回复）</li>
  * </ul>
  *
- * <p>java.net.http.WebSocket 是回调式 API，这里用阻塞队列把它拍平成"读下一帧"的同步模型——
+ * <p>{@link MaicaRawSocket} 是回调式 API，这里用阻塞队列把它拍平成"读下一帧"的同步模型——
  * 协议状态机比回调链好懂得多，且 {@link #query} 本来就跑在后台线程上。
  */
-public final class MaicaWsSession implements WebSocket.Listener {
+public final class MaicaWsSession implements MaicaRawSocket.Listener {
 
     private static final Duration HANDSHAKE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration FIRST_FRAME_TIMEOUT = Duration.ofSeconds(20);
@@ -67,7 +62,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
     private final MaicaHandoff handoff;
 
     private final BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
-    private volatile WebSocket ws;
+    private volatile MaicaRawSocket ws;
 
     private static final ScheduledExecutorService SPING = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "maidllmlocal-maica-sping");
@@ -172,7 +167,7 @@ public final class MaicaWsSession implements WebSocket.Listener {
 
     /** 连接不再使用时断开（站点被删/游戏退出）。 */
     public synchronized void close() {
-        WebSocket current = ws;
+        MaicaRawSocket current = ws;
         ws = null;
         if (current != null) {
             current.abort();
@@ -187,10 +182,8 @@ public final class MaicaWsSession implements WebSocket.Listener {
         }
         inbox.clear();
         MaidLLMLocal.LOGGER.info("maica ws connecting {} ...", wsUrl);
-        WebSocket connected = HttpClient.newHttpClient().newWebSocketBuilder()
-                .connectTimeout(Duration.ofSeconds(20))
-                .buildAsync(URI.create(wsUrl), this)
-                .get(20, TimeUnit.SECONDS);
+        MaicaRawSocket connected = new MaicaRawSocket(wsUrl);
+        connected.connect(this, Duration.ofSeconds(20));
         ws = connected;
         try {
             handshake();
@@ -386,11 +379,11 @@ public final class MaicaWsSession implements WebSocket.Listener {
     // ---------- 帧收发 ----------
 
     private void send(JsonObject obj) {
-        WebSocket current = ws;
+        MaicaRawSocket current = ws;
         if (current == null) {
             throw new IllegalStateException("maica ws not connected");
         }
-        current.sendText(obj.toString(), true).join();
+        current.sendText(obj.toString());
     }
 
     private MaicaProtocol.Envelope recv(long timeoutMs) throws Exception {
@@ -434,32 +427,22 @@ public final class MaicaWsSession implements WebSocket.Listener {
         return content.length() > 120 ? content.substring(0, 120) + "..." : content;
     }
 
-    // ---------- WebSocket.Listener ----------
-
-    private final StringBuilder partial = new StringBuilder();
+    // ---------- MaicaRawSocket.Listener ----------
 
     @Override
-    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-        partial.append(data);
-        if (last) {
-            inbox.offer(partial.toString());
-            partial.setLength(0);
-        }
-        // java.net.http.WebSocket 是拉取式流控：初始额度只有 1 条消息，
-        // 不持续 request 就会在收到第一帧(initiated)后永远静默——WsProbe 对照实验实锤
-        webSocket.request(1);
-        return CompletableFuture.completedFuture(null);
+    public void onText(String fullText) {
+        // 分片在 MaicaRawSocket 里已拼完，这里收到的就是完整一条 JSON 消息
+        inbox.offer(fullText);
     }
 
     @Override
-    public void onError(WebSocket webSocket, Throwable error) {
+    public void onError(Throwable error) {
         inbox.offer(POISON);
     }
 
     @Override
-    public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+    public void onClose(int statusCode, String reason) {
         inbox.offer(POISON);
-        return CompletableFuture.completedFuture(null);
     }
 
     static {

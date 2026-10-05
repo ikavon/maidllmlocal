@@ -77,6 +77,32 @@ AFoP 的 EMF 已 JiJ MixinExtras 0.5.3 > 我们的 0.4.1 → FML 取高版跳过
 | parchment 映射 | official(SRG 运行时,reobfJar + refmap 桥接;两个 mixin 均 remap=false) |
 | `ResourceLocation.fromNamespaceAndPath` | 47.4.x 反向移植,**存在**,可直接用(forge_version_range 因此收 [47.4,)) |
 
+## ⚠️ JDK 17 的 WebSocket 握手坑(2026-10-05 真实环境暴露)
+
+主线跑 JDK 21 没问题,本分支跑 JDK 17 时 WS 握手必失败:
+
+- 现象:`WebSocketHandshakeException` → MAICA 那侧 LLM 请求报错,但同一台机器的
+  REST(POST `/api`、注册换 token)完全正常,极易误判成网络/CDN 问题。
+- 根因:JDK 的 HTTP/1.1 客户端做 WS 升级时会在 GET 里附 `Content-Length: 0`。
+  MAICA 接入层(nginx 前置 CDN)见这个头直接回 502。对照实验:curl 加上该头复现 502,
+  去掉就是 101;Java 17 直连 100% 502。
+- JDK 没有开关能关掉这个头,所以 `MaicaRawSocket` 自己写了握手+帧收发
+  (RFC 6455 客户端侧:掩码、分片、ping/pong、close),`MaicaWsSession` 改用它的
+  Listener。语义与 JDK 版一致,业务层无感。
+- 复现/验证手段:本地监听抓握手报文(脚本思路见 Git 历史里的一次性探针,不留入库)。
+- **自测抓到两个真 bug,别以为「不报 502」就好了**:
+  1. **16 位帧长度字节序写反**——`(a) | ((b) << 8)` 是小端,线上是大端(先高后低)。
+     写反把 312 读成 14337,整条流从此错位。现象很阴:`<126 字节`的消息全正常,
+     `≥126 字节`的全废——正好是「短回复正常、长回复永远等不到」,极易误判成模型慢/超时。
+     本地 echo server 一发分片帧就现形。
+  2. **`SSLSocketFactory.createSocket(host, port)` 返回的是已连接 socket**——
+     再调 `socket.connect()` 直接抛 `SocketException("already connected")`。
+     必须用不带参数的 `createSocket()`,先设 SNI 再 `connect()`。
+- 帧解析这类东西**没有编译期保护**,字节序、掩码位、控制帧 125 上限全靠自测兜底。
+  改 `MaicaRawSocket` 前先跑一遍「本地 echo server + 真实端点」的最小自测
+  (echo server 要会发分片帧、会发 ping、会发 >65535 字节的帧,这三条正好覆盖
+  FIN/continuation、控制帧、16/64 位长度三条路径)。
+
 ## 与主线的双向维护
 
 - 两边网络层已结构性分叉:**业务逻辑改动**(hub/handler/maica/*)可 cherry-pick,
