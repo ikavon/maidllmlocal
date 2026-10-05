@@ -23,6 +23,16 @@ final class MaicaProtocol {
     static final String MODEL_ANNO = "maica_model_anno";
     static final String FEATURE_PREFIX = "maica_feature_";
 
+    /**
+     * {@code type: params} 的生效回执。MAS 的 {@code MAICASettingSendTasker} 把它当成阻塞点
+     * （{@code except_ws_status=['maica_params_accepted']}），首条 query 一定在参数落地之后；
+     * 我们在 10-05 之前用的是固定时长 drain，query 可能抢在参数生效前出门——那几轮跑在
+     * 默认参数上（savefile_access/session_len_limit 都没带上），也就解释了跨前端记忆落空。
+     */
+    static final String PARAMS_ACCEPTED = "maica_params_accepted";
+    /** {@code reset: true} 时先回这帧再回 accepted；reset:false 不会有。 */
+    static final String PARAMS_RESET = "maica_params_reset";
+
     // --- 对话流 ---
     static final String STREAM_CONTINUE = "maica_core_streaming_continue";
     static final String LOOP_FINISHED = "maica_chat_loop_finished";
@@ -126,7 +136,7 @@ final class MaicaProtocol {
                  "maica_provider_anno", "pong",
                  RECONN_BUFFER_STARTED, RECONN_DRAINED, RECONN_EMPTY,
                  "maica_connection_reuse_attempt", "maica_connection_reuse_stale",
-                 WORKER_LOOP_FINISHED, "maica_params_accepted", "maica_params_reset", "maica_session_reset",
+                 WORKER_LOOP_FINISHED, PARAMS_ACCEPTED, PARAMS_RESET, "maica_session_reset",
                  "maica_mcore_gen_start", STREAM_CONTINUE, "maica_core_complete", LOOP_FINISHED,
                  "maica_quality_status", "maica_history_sliced", "maica_history_slice_hint",
                  "maica_mspire_searching", "maica_mspire_page_found",

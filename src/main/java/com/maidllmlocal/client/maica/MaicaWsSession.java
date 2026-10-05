@@ -40,6 +40,18 @@ public final class MaicaWsSession implements MaicaRawSocket.Listener {
     private static final long QUERY_TIMEOUT_MS = 90_000L;
     private static final long ANNOUNCE_GRACE_MS = 1_500L;
     private static final long DRAIN_BUDGET_MS = 5_000L;
+
+    /** 等 {@code maica_params_accepted} 的预算。params 回执实测在 established 后 1~2 秒内到达。 */
+    private static final long PARAMS_ACK_BUDGET_MS = 10_000L;
+
+    /**
+     * 会话历史窗口（token）。必须和 MAS 同值——同一 session 两端共用一个切片点，
+     * 谁后写谁说了算。MAS 滑条默认且恒为 8192（header.rpy:238）。
+     */
+    private static final int SESSION_LEN_LIMIT = 8192;
+
+    /** MAICA 的时间注入用 IANA 时区串；MAS 传 Asia/Shanghai（maica.py 的 tz 字段）。 */
+    private static final String TIMEZONE = "Asia/Shanghai";
     private static final long SPING_INTERVAL_S = 30L;
 
     /** 连接在收帧途中死掉时进队列的哨兵。 */
@@ -269,19 +281,64 @@ public final class MaicaWsSession implements MaicaRawSocket.Listener {
      * <p>握手时调一次，之后每当本轮语言与当前生效值不同时再调一次（见 {@link #query}）——
      * target_lang 是会话级参数，per-maid 覆盖只能靠重发 params 生效。
      */
-    private void sendChatParams(String lang) {
+    private void sendChatParams(String lang) throws Exception {
         JsonObject chatParams = new JsonObject();
         chatParams.addProperty("stream_output", true);
         chatParams.addProperty("target_lang", lang);
         chatParams.addProperty("savefile_access", hosted());
         chatParams.addProperty("enable_mt", enableMt);
         chatParams.addProperty("enable_mf", hosted());
+        // 下面三个对齐 MAS 的参数全集（mas 每次启动都发）。缺省时后端落它自己的默认值，
+        // 而 session_len_limit 缺省是跨前端记忆丢失的头号嫌疑：它决定后端给这个会话留多少
+        // 历史预算，没有预算就没得存。跨前端共享同一 session 时两端必须同值，否则后写的
+        // 覆盖先写的切片点——MAS 恒为 8192，这里对齐它。
+        chatParams.addProperty("session_len_limit", SESSION_LEN_LIMIT);
+        chatParams.addProperty("tz", TIMEZONE);
+        chatParams.addProperty("gen_quality_chk", true);
         JsonObject params = new JsonObject();
         params.addProperty("type", "params");
         params.add("chat_params", chatParams);
         params.addProperty("reset", false);
         send(params);
         activeLang = lang;
+        awaitParamsAccepted();
+    }
+
+    /**
+     * 等 {@code maica_params_accepted} 再放行 query。
+     *
+     * <p>MAS 的 {@code MAICASettingSendTasker} 以它为阻塞点（{@code except_ws_status=
+     * ['maica_params_accepted']}），首条 query 一定在参数生效之后；我们 10-05 之前用的是
+     * 固定时长 {@code drain}，靠猜时机——query 完全可能抢在参数落地前出门，那几轮就跑在
+     * 默认参数上（savefile_access / session_len_limit / enable_mf 全都没生效）。
+     * 10-05 的跨前端记忆丢失就长这样，所以这里必须同步。
+     *
+     * <p>超时只告警、不抛：参数没生效最坏是这一轮少了 MFocus 增强，不该把玩家一句发言
+     * 变成红字报错。收到 FATAL 才抛——那说明这条连接已经不能用了。
+     */
+    private void awaitParamsAccepted() throws Exception {
+        long deadline = System.currentTimeMillis() + PARAMS_ACK_BUDGET_MS;
+        try {
+            while (true) {
+                MaicaProtocol.Envelope env = recv(remaining(deadline));
+                if (MaicaProtocol.PARAMS_ACCEPTED.equals(env.status())) {
+                    return;
+                }
+                // reset:false 不会有 params_reset，但留着判一眼以便将来改成 true 时不炸
+                if (MaicaProtocol.PARAMS_RESET.equals(env.status())) {
+                    continue;
+                }
+                if (env.severity() == MaicaProtocol.Severity.FATAL) {
+                    close();
+                    throw new Exception("MAICA params rejected: " + env.status()
+                            + " " + env.content());
+                }
+            }
+        } catch (FrameTimeoutException quiet) {
+            MaidLLMLocal.LOGGER.warn("maica params accepted 未收到（{}ms 预算耗尽），"
+                            + "本轮按后端默认参数跑；MAS 在这里是阻塞的",
+                    PARAMS_ACK_BUDGET_MS);
+        }
     }
 
     // ---------- 一轮对话 ----------
