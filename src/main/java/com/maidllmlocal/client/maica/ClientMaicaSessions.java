@@ -75,8 +75,10 @@ public final class ClientMaicaSessions {
         SESSIONS.put(siteId, created);
         if (enableMt) {
             // 表按 session 号存，上传的号必须与 query 用的号一致（否则托管号下拿到空表、
-            // 表现成"配了 enable_mt 却什么都不发生"）。-1 模式正是靠这张预上传的表——
-            // query 内联的 triggers 在 -1 下到不了管线（官方节点实测）
+            // 表现成"配了 enable_mt 却什么都不发生"）。-1 模式也是靠这张预上传的表——
+            // query 内联的 triggers 在 -1 下到不了管线（官方节点实测；2026-10-06 后端
+            // 把 -1 的触发器表支持转正：SessionTrigger.SESSION_DB_MIN = -1）。
+            // -1 的表少一项 write_memory（纯对话模式没有记忆注入通道，见 MaicaMemory）
             MaicaTriggerUploader.uploadAsync(site.url(), site.secretKey(), httpBase, chatSession);
         }
         return created.session();

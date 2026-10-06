@@ -69,7 +69,10 @@ public final class MaicaTriggers {
                 delta, raw, maid.getFavorabilityManager().getLevel(), maid.getFavorability());
     }
 
-    /** {@code {"memory_item": "<一句记忆>"}} → 女仆 NBT（下轮起注入 prompt）。 */
+    /**
+     * {@code {"memory_item": "<一句记忆>"}} → 女仆 NBT（托管模式下下轮起随场景注入 prompt）。
+     * 只有托管会话会上传 write_memory 模板（见 MaicaTriggerUploader），-1 纯对话模式拿不到这条。
+     */
     private static void writeMemory(EntityMaid maid, JsonObject args, String playerName) {
         JsonElement item = args.get("memory_item");
         if (item == null || !item.isJsonPrimitive()) {
