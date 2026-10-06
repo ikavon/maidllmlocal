@@ -51,7 +51,10 @@ public final class MaicaTriggerUploader {
         // 文档：除 content 外均为 str。⚠️ -1 这个值别"顺手改成 0"——-1 模式正是靠它拿到
         // 表的（2026-09-17 实测三项触发器全通过）。REST 文档写的是 0-9，托管号也照抄原值发。
         body.addProperty("chat_session", String.valueOf(chatSession));
-        body.add("content", buildTable());
+        // write_memory 只上给托管会话：-1 是纯对话模式，没有记忆注入通道（见
+        // com.maidllmlocal.maica.MaicaMemory），留着模板只会让后端每轮白跑一次
+        // MTrigger 蒸馏、还多占一轮后处理延迟。
+        body.add("content", buildTable(chatSession >= 0));
 
         HttpRequest request;
         try {
@@ -111,10 +114,12 @@ public final class MaicaTriggerUploader {
     }
 
     /**
-     * 三件套触器表。switch 的 item_list 是当前注册的全部任务显示名（客户端 locale）——
+     * 触发器表。switch 的 item_list 是当前注册的全部任务显示名（客户端 locale）——
      * 服务端执行时先按 uid 路径匹配再按显示名匹配，双语言环境错位只会降级不会误切。
+     *
+     * @param includeMemory 是否带 {@code write_memory}（托管会话 true，-1 会话 false）
      */
-    private static JsonArray buildTable() {
+    private static JsonArray buildTable(boolean includeMemory) {
         JsonArray table = new JsonArray();
 
         // 好感度增减：name 是协议固定值（缺了官方节点直接拒收），全程最多一个
@@ -123,14 +128,16 @@ public final class MaicaTriggerUploader {
         affection.addProperty("name", "alter_affection");
         table.add(affection);
 
-        // 长期记忆写回：name 同样固定。回传的 memory_item 由前端自存，后端不同步。
-        // 注意：工具描述在后端硬编码（agent_tools.py MemoryTrigger.to_tool），本表就算加
-        // description 字段也会被静默丢弃（BaseTrigger 没有这个字段）——别想在这里改
-        // 「写什么记忆」的引导，那是 L2 场景措辞（MaicaScene）的职责。
-        JsonObject memory = new JsonObject();
-        memory.addProperty("template", "memory_writeback_template");
-        memory.addProperty("name", "write_memory");
-        table.add(memory);
+        if (includeMemory) {
+            // 长期记忆写回：name 同样固定。回传的 memory_item 由前端自存，后端不同步。
+            // 注意：工具描述在后端硬编码（agent_tools.py MemoryTrigger.to_tool），本表就算加
+            // description 字段也会被静默丢弃（BaseTrigger 没有这个字段）——别想在这里改
+            // 「写什么记忆」的引导，那是 L2 场景措辞（MaicaScene）的职责。
+            JsonObject memory = new JsonObject();
+            memory.addProperty("template", "memory_writeback_template");
+            memory.addProperty("name", "write_memory");
+            table.add(memory);
+        }
 
         JsonObject switchTask = new JsonObject();
         switchTask.addProperty("template", "common_switch_template");

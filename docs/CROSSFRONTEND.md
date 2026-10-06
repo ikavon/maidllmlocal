@@ -37,6 +37,12 @@ DDLC 中知道自己是游戏角色的 canon 认知一致。MAICA 骨架的原�
 - 提示词注入总闸：`setting_utils.py:404` `prompt_writable = (chat_session >= 0)`
   ——-1 下 MFocus / sf_access（存档 RAG）/ 名字替换全部关闭。
 - 存档 DB 拒绝负 session：`db_bound_obj.py:111` 强制 `0 <= session_num < 10`。
+- **2026-10-06 后端改动（v1.1.007 后）把两件事转正**：① `savefile_loadable`
+  属性（`setting_utils.py`）把「-1 无存档访问」从副作用变成显式条件，注释原话
+  *"-1's prompt is fe managed, so not appliable"*——**-1 的 prompt 完全归前端**；
+  ② `SessionTrigger.SESSION_DB_MIN = -1`：**触发器表对 -1 是后端管的后端服务**
+  （注释：*"frontend-managed for conversation history, but its trigger table remains
+  backend-managed"*）。我们 `POST /trigger` 预上传的路子由官方验收，且 `DELETE` 也接受 -1 了。
 
 ### savefile（账号级存档）
 
@@ -196,7 +202,13 @@ TLM 女仆 AI 聊天设置里的**「主人称呼」**（`ownerName`），留空
 | L0 | MAICA 骨架（后端固定） | 莫妮卡内核、情感、语气——两端天然同一人 |
 | L1 | savefile additions（跨前端持久） | 旅行记忆——**不种种子**，由她自主蒸馏（write_memory 原样透传，见上） |
 | L2 | query 场景包装（MC 侧每轮） | 身处 Minecraft 世界/在这里有一具身体/维度·游戏天数·时刻·天气/当前状态/本存档首访标志 |
+| L2b | 女仆 NBT 长期记忆（MC 侧每轮） | write_memory 蒸馏出的 MC 本地记忆（≤1KB，known_info 语域）+ 当前关系等级——托管下这两层都挂在最后一条 user 消息上 |
 | L3 | MTrigger（行为层） | 模式切换/好感度/write_memory，原样工作 |
+
+> **v0.7.0：-1 模式与注入彻底脱钩。** 此前 -1 下走的是「把长期记忆+好感度并进 system」
+> 的注入路径，每轮重发（TLM 的 system 每轮重建、历史不含注入块，所以「只发首轮」不成立，
+> 见 `MaicaMemory` 类注释）。现在 -1 = 纯对话模式：不注入、也不上传 `write_memory` 模板；
+> 长期记忆成为托管模式独有的能力（L2b 只在托管下存在）。好感度的**变化**两边都有。
 
 ## 两个实验方案
 

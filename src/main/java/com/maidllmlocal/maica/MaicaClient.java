@@ -55,9 +55,9 @@ public class MaicaClient implements LLMClient {
                 // 托管模式：后端丢弃 system（骨架提示词覆盖），人设/记忆/场景全部
                 // 改挂到最后一条 user 消息正文——客户端只取这一条发出（见 CROSSFRONTEND.md L2）
                 history = withSceneWrap(maid, history);
-            } else if (enableMt()) {
-                history = withContextInjection(maid, history);
             }
+            // -1 模式不做任何注入：它是纯对话模式，长期记忆与关系状态都归托管模式。
+            // 为什么"首轮注入一次"不成立、为什么干脆砍掉——见 MaicaMemory 类注释
             // 输入侧展开：MAS 人设卡常带 {player_name}，发出去前换成真名，模型不必再见宏
             messagesJson = MaicaMessages.toJson(expandPlayerMacros(history, playerName));
         } catch (Throwable t) {
@@ -195,8 +195,12 @@ public class MaicaClient implements LLMClient {
     }
 
     /**
-     * 托管模式的注入：场景事实（{@link MaicaScene}）+ 女仆 NBT 里的长期记忆，
-     * 都并进最后一条 user 消息。只改发送副本，不写回 TLM 历史。
+     * 托管模式的注入：场景事实（{@link MaicaScene}）+ 女仆 NBT 里的长期记忆
+     * （{@link MaicaMemory}），都并进最后一条 user 消息。只改发送副本，不写回 TLM 历史。
+     *
+     * <p>为什么必须每轮注入：TLM 的 system 人设每轮重建、历史队列里只有问答轮次，
+     * 注入块没有任何持久载体——少注入一轮，她就少看见一次。这是托管模式下 MC 本地
+     * 记忆的唯一通道。
      */
     private static List<LLMMessage> withSceneWrap(EntityMaid maid, List<LLMMessage> history) {
         String memory = MaicaMemory.promptBlock(maid);
@@ -215,37 +219,6 @@ public class MaicaClient implements LLMClient {
                 continue;
             }
             copy.add(0, msg);
-        }
-        return copy;
-    }
-
-    /**
-     * 把本机托管的上下文（长期记忆 + 当前好感度）拼成文本，<b>并入</b>人设 system 消息的正文。
-     *
-     * <p>为什么不是"再插一条 system 消息"：MAICA 后端对 query 的校验是
-     * "System message must be at the beginning"——全列表只允许位于开头的那一条 system。
-     * 多插一条（哪怕紧挨着人设）整轮直接 400（2026-09-17 实测）。所以合并进唯一的人设
-     * system 消息；历史里若没有 system 人设，才把注入块作为单独一条放在开头。
-     *
-     * <p>只改这一轮的发送副本，不写回 TLM 历史——否则历史里会越攒越多条重复的记忆。
-     */
-    private static List<LLMMessage> withContextInjection(EntityMaid maid, List<LLMMessage> history) {
-        String block = MaicaMemory.promptBlock(maid);
-        if (block.isEmpty()) {
-            return history;
-        }
-        List<LLMMessage> copy = new ArrayList<>(history.size());
-        boolean merged = false;
-        for (LLMMessage msg : history) {
-            if (!merged && (msg.role() == Role.SYSTEM || msg.role() == Role.DEVELOPER)) {
-                copy.add(new LLMMessage(msg.role(), msg.message() + "\n\n" + block, msg.gameTime()));
-                merged = true;
-                continue;
-            }
-            copy.add(msg);
-        }
-        if (!merged) {
-            copy.add(0, new LLMMessage(Role.SYSTEM, block, maid.level().getGameTime()));
         }
         return copy;
     }
