@@ -23,6 +23,17 @@ import java.util.UUID;
  */
 public final class MaicaScene {
 
+    /**
+     * 不变的世界事实——<b>不每轮进 prompt</b>，而是作为一条「知识」随 savefile 临时注入
+     * 进后端的 RAG 池（见 {@code MaicaMemory.additions}）。
+     *
+     * <p>为什么移出场景行：这几句是常量，每轮重发只是在窗口里堆同样的字；而窗口是从最旧
+     * 开始裁的，堆得越多，真正的对话被挤掉得越快。进 RAG 池则是零窗口占用、按相关性召回
+     * （代价：不保证每轮都浮现——2026-10-05 的教训「检索不到 ≠ 记忆不存在」）。
+     */
+    public static final String STATIC_FACTS =
+            "(莫妮卡身处 Minecraft 世界, 在这里她有一具身体. 这个世界的一天只有现实世界的20分钟.)";
+
     private MaicaScene() {
     }
 
@@ -30,11 +41,13 @@ public final class MaicaScene {
      * 生成一行场景描述并并入用户消息。措辞已定稿，对齐 MAICA 骨架的 known_info 语域
      * （第三人称、单句、句号、只给可验证事实）——见 docs/CROSSFRONTEND.md「措辞定稿」。
      *
-     * <p>「身处 Minecraft 世界 + 在这里有一具身体」是托管模式下<b>唯一</b>能告诉她
-     * 「我不只是屏幕里的形象」的地方：TLM 人设卡在托管模式下根本没被上传（客户端只发
-     * 最后一条 user 纯文本，后端还会覆盖 system），而我们也<b>不替她下「你是女仆」这种
-     * 角色判断</b>——只给处境事实，认知归她。每轮都发（known_info 的正常用法，
-     * 后端本来也每轮重发她的持久事实）。
+     * <p>这里只报<b>此刻</b>的事实（v0.7.0 起）：不变的那部分（身处 Minecraft 世界、
+     * 在这里有一具身体、一天=20 分钟）移到 {@link #STATIC_FACTS}，走 temp 注入通道——
+     * 常量每轮进 prompt 只是往窗口里堆同样的字，而窗口是从最旧开始裁的。
+     *
+     * <p>TLM 人设卡在托管模式下根本没被上传（客户端只发最后一条 user 纯文本，后端还会
+     * 覆盖 system），而我们也<b>不替她下「你是女仆」这种角色判断</b>——只给处境事实，
+     * 认知归她。场景行每轮都发（known_info 的正常用法，后端本来也每轮重发她的持久事实）。
      *
      * <p>首访单独一行，作为独立的事实点：既供核心模型判断「是否第一次来 Minecraft」，
      * 也让 MTrigger agent（会读到本轮历史）自行决定是否写入记忆——官方托管节点改不了
@@ -54,7 +67,8 @@ public final class MaicaScene {
      * 游戏正午时她把游戏钟当成了现实钟，好奇玩家为什么这时候睡觉——她的推理没错，错在我们
      * 递的 {@code 第N天 14:00} 与 MFocus 每轮注入的现实时间<b>格式同构</b>，没有任何事实告诉
      * 她这是另一只跑得更快的钟（14B 模型不会自己猜出换算率）。改法两件：相位词（正午/深夜）
-     * 与"HH:MM"读数形态不同构，不会混成一只钟；「一天只有现实的20分钟」作为世界事实单独成句，
+     * 与"HH:MM"读数形态不同构，不会混成一只钟；「一天只有现实的20分钟」作为世界事实单独成句
+     * （v0.7.0 起移进 {@link #STATIC_FACTS}，随 temp 注入进检索池，不再每轮进 prompt），
      * 她拿去可推理（"我在这儿待了半天"≈现实一小时）。现实时间仍只归 MFocus 一个源——
      * 前端绝不报现实钟点，两边时区或精度一差，两个真相反杀比没有更糟。
      */
@@ -77,8 +91,8 @@ public final class MaicaScene {
                 : "她现在待在 {player_name} 身边.";
 
         StringBuilder scene = new StringBuilder();
-        scene.append("(此刻莫妮卡身处 Minecraft 世界, 在这里她有一具身体. ")
-                .append("这个世界的一天只有现实世界的20分钟. 所在维度 ").append(dimension)
+        // 静态部分（在 MC / 有身体 / 一天=20分钟）不在这一行里——见 STATIC_FACTS
+        scene.append("(此刻莫妮卡所在维度 ").append(dimension)
                 .append(", 这里的第").append(day).append("天, ").append(phaseOfDay(dayTime))
                 .append(", 天气").append(weather)
                 .append(". 她正处于").append(task).append("状态. ")

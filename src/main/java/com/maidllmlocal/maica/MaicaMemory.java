@@ -8,8 +8,10 @@ import net.minecraft.nbt.Tag;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 女仆的长期记忆：存在女仆实体 NBT 里（跟着存档走），由 MAICA 的
@@ -39,8 +41,13 @@ public final class MaicaMemory {
     private static final int MAX_ENTRY_CHARS = 256;
     /** 总条数上限：超出丢最旧。 */
     private static final int MAX_ENTRIES = 50;
-    /** 注入 prompt 的记忆总量上限：每轮 user 消息预算里划给记忆的份额。 */
-    private static final int MAX_PROMPT_BYTES = 1024;
+    /** 送后端的记忆总量上限：temp 注入要每轮嵌入/重排，不该无限长。 */
+    private static final int MAX_ADDITIONS_BYTES = 1024;
+    /**
+     * 单轮 temp 注入的条数上限。后端硬限制见 {@link MaicaCarrier#MAX_ADDITIONS}；
+     * 这里留 1 个位置给静态世界事实（{@link MaicaScene#STATIC_FACTS}）。
+     */
+    private static final int MAX_ADDITIONS = MaicaCarrier.MAX_ADDITIONS - 1;
 
     private MaicaMemory() {
     }
@@ -63,26 +70,35 @@ public final class MaicaMemory {
     }
 
     /**
-     * 拼本轮注入用的记忆块：最新优先，总量 ≤1KB；没有记忆时返回空串（调用方跳过注入）。
+     * 托管模式每轮随 query 送后端的「知识」条目（temp savefile additions）——
+     * 最新优先，≤1KB / ≤{@value #MAX_ADDITIONS} 条，按句去重。
      *
-     * <p><b>为什么不报当前好感度</b>（2026-10-07 用户定调，与 -1 一致）：关系状态该由
-     * 「变化」体现——MTrigger 每轮的好感度增减本身就是事件，她感知得到；报一个数值只是
-     * 占窗口的固定内容。数值哪天真的有用（比如她想说"我们现在是恋人了吧"），
-     * 再由 TLM 自己的状态告知渠道解决，不该由记忆块兼职。
+     * <p><b>为什么不进 prompt</b>（2026-10-07 用户拍板 C 方案）：进 prompt 就得每轮重发，
+     * 而托管模式下我们发的 user 文本会进后端历史——N 轮之后窗口里就躺着 N 份同样的记忆，
+     * 把真正的对话挤出去。改走 temp savefile 后窗口零占用，检索交给后端的 MF/RAG
+     * （代价：每轮只重排出 top-2 条进 known_info，不保证每条都浮现——
+     * 2026-10-05 的教训「检索不到 ≠ 记忆不存在」）。
+     *
+     * <p><b>temp 不入库</b>（后端源码实锤）：{@code content_temp} 是会话对象上的内存 dict，
+     * 每轮被 query 里那份覆盖，检索时与 perm 合并进候选池当场重排——所以重发不会
+     * 在向量库/数据库里累积副本。
+     *
+     * <p><b>为什么不报当前好感度</b>（2026-10-07 用户定调）：关系状态该由「变化」体现——
+     * MTrigger 每轮的好感度增减本身就是事件，她感知得到；报一个数值只是固定内容。
      */
-    public static String promptBlock(EntityMaid maid) {
-        List<String> picked = pickWithinBudget(readAll(maid));
-        if (picked.isEmpty()) {
-            return "";
+    public static List<String> additions(EntityMaid maid) {
+        List<String> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String memory : pickWithinBudget(readAll(maid))) {
+            String sentence = asStatement(memory);
+            if (seen.add(sentence)) {
+                out.add(sentence);
+            }
         }
-        StringBuilder block = new StringBuilder("(莫妮卡记得这些事:");
-        for (String memory : picked) {
-            block.append(' ').append(asStatement(memory));
-        }
-        return block.append(")").toString();
+        return out;
     }
 
-    /** 记忆条目落进 prompt 前的收尾：补半角句号（known_info 语域一句一断）。 */
+    /** 记忆条目离开前端前的收尾：补半角句号（known_info 语域一句一断）。 */
     private static String asStatement(String memory) {
         String s = memory.strip();
         return s.endsWith(".") || s.endsWith("。") ? s : s + ".";
@@ -94,8 +110,8 @@ public final class MaicaMemory {
      */
     private static List<String> pickWithinBudget(List<String> memories) {
         LinkedList<String> picked = new LinkedList<>();
-        int budget = MAX_PROMPT_BYTES;
-        for (int i = memories.size() - 1; i >= 0; i--) {
+        int budget = MAX_ADDITIONS_BYTES;
+        for (int i = memories.size() - 1; i >= 0 && picked.size() < MAX_ADDITIONS; i--) {
             String memory = memories.get(i);
             int cost = memory.getBytes(StandardCharsets.UTF_8).length + 4;
             if (cost > budget) {

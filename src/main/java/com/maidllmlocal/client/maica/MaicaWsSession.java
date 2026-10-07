@@ -1,9 +1,11 @@
 package com.maidllmlocal.client.maica;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.maidllmlocal.MaidLLMLocal;
+import com.maidllmlocal.maica.MaicaCarrier;
 import com.maidllmlocal.maica.MaicaRoundResult;
 import com.maidllmlocal.maica.MaicaTrigger;
 
@@ -12,7 +14,9 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -111,21 +115,23 @@ public final class MaicaWsSession implements WebSocket.Listener {
         payload.addProperty("pprt", true);
         if (hosted()) {
             // 托管模式：历史在后端，query 只发本轮用户消息纯文本；
-            // 交接记忆走 savefile 临时注入（后端与持久档合并后参与 RAG）
+            // 知识条目走 savefile 临时注入（后端与 perm 合并后进检索候选池，不落库）
             payload.addProperty("chat_session", chatSession);
-            String queryText = extractLastUserText(messagesJson);
+            // 服务端捎来的知识条目（静态世界事实 + MC 本地记忆）挂在消息数组的哨兵里，
+            // 必须摘掉：它是 developer role，进 query 会被后端拒
+            MaicaCarrier.Stripped stripped = MaicaCarrier.strip(messagesJson);
+            String queryText = extractLastUserText(stripped.messagesJson());
             payload.addProperty("query", queryText);
-            int attached = 0;
-            if (handoff != null && !handoff.isEmpty()) {
+            JsonArray additions = mergeAdditions(stripped.additions());
+            if (!additions.isEmpty()) {
                 JsonObject savefile = new JsonObject();
-                savefile.add("mas_player_additions", handoff.additions());
+                savefile.add("mas_player_additions", additions);
                 payload.add("savefile", savefile);
-                attached = handoff.additions().size();
             }
             // 原文进日志——托管模式下这是唯一能看到"她实际收到什么"的地方：
             // L2 场景包装只改发送副本（TLM 历史里没有），后端存的历史也取不回来。
-            MaidLLMLocal.LOGGER.info("maica query (session={}, handoff additions={}):\n{}",
-                    chatSession, attached, queryText);
+            MaidLLMLocal.LOGGER.info("maica query (session={}, additions={}):\n{}",
+                    chatSession, additions.size(), queryText);
         } else {
             payload.addProperty("chat_session", -1);
             payload.add("query", JsonParser.parseString(messagesJson).getAsJsonArray());
@@ -137,6 +143,31 @@ public final class MaicaWsSession implements WebSocket.Listener {
             MaidLLMLocal.LOGGER.info("maica connection dropped mid-round, trying reconn resume");
             return recoverStream();
         }
+    }
+
+    /**
+     * 合并本轮 temp additions：服务端捎来的知识条目（静态世界事实 + MC 本地记忆）在前，
+     * MAS 交接条目在后。<b>去重</b>——后端把 temp 与 perm 直接相加、不去重，我们至少别在
+     * 自己这一侧制造重复；<b>裁剪</b>到 {@link MaicaCarrier#MAX_ADDITIONS}，超了后端
+     * 整轮抛 MaicaInputWarning。
+     */
+    private JsonArray mergeAdditions(List<String> knowledge) {
+        Set<String> merged = new LinkedHashSet<>(knowledge);
+        if (handoff != null && !handoff.isEmpty()) {
+            for (JsonElement item : handoff.additions()) {
+                if (item.isJsonPrimitive()) {
+                    merged.add(item.getAsString());
+                }
+            }
+        }
+        JsonArray out = new JsonArray();
+        for (String item : merged) {
+            if (out.size() >= MaicaCarrier.MAX_ADDITIONS) {
+                break;
+            }
+            out.add(item);
+        }
+        return out;
     }
 
     /**
