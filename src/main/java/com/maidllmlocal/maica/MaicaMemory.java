@@ -1,6 +1,5 @@
 package com.maidllmlocal.maica;
 
-import com.github.tartaricacid.touhoulittlemaid.entity.favorability.FavorabilityManager;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -13,9 +12,10 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * 女仆的长期记忆与关系状态：存在女仆实体 NBT 里（跟着存档走），由 MAICA 的
+ * 女仆的长期记忆：存在女仆实体 NBT 里（跟着存档走），由 MAICA 的
  * {@code write_memory} 触发器写入，<b>托管模式</b>（{@code chat_session ≥ 0}）下
  * 每轮随场景一起注入最后一条 user 消息（见 {@link MaicaClient#withSceneWrap}）。
+ * 好感度不在这里报——见 {@link #promptBlock}。
  *
  * <p><b>为什么 session=-1 不再注入</b>（2026-10-07 定案）：-1 是前端自持上下文的
  * 纯对话模式，而 TLM 的 system 人设每轮重建、历史队列里只有问答轮次——注入块没有
@@ -63,27 +63,23 @@ public final class MaicaMemory {
     }
 
     /**
-     * 拼本轮注入用的上下文块：长期记忆（最新优先，总量 ≤1KB）+ 当前关系状态。
+     * 拼本轮注入用的记忆块：最新优先，总量 ≤1KB；没有记忆时返回空串（调用方跳过注入）。
      *
-     * <p>关系状态行保留（托管模式）：MAICA 原生做法里 savefile 的 {@code mas_affection}
-     * 也是进 known_info 的——MC 侧的好感度是 TLM 自己的表，后端完全不知道，不报给她
-     * 就无从判断关系阶段。这一行每轮都在变（MTrigger 会改它），
-     * 不属于"重复注入的固定内容"。
+     * <p><b>为什么不报当前好感度</b>（2026-10-07 用户定调，与 -1 一致）：关系状态该由
+     * 「变化」体现——MTrigger 每轮的好感度增减本身就是事件，她感知得到；报一个数值只是
+     * 占窗口的固定内容。数值哪天真的有用（比如她想说"我们现在是恋人了吧"），
+     * 再由 TLM 自己的状态告知渠道解决，不该由记忆块兼职。
      */
     public static String promptBlock(EntityMaid maid) {
-        StringBuilder block = new StringBuilder();
         List<String> picked = pickWithinBudget(readAll(maid));
-        if (!picked.isEmpty()) {
-            block.append("(莫妮卡记得这些事:");
-            for (String memory : picked) {
-                block.append(' ').append(asStatement(memory));
-            }
-            block.append(")\n");
+        if (picked.isEmpty()) {
+            return "";
         }
-        FavorabilityManager fm = maid.getFavorabilityManager();
-        block.append("(莫妮卡与 {player_name} 的关系等级是 ").append(fm.getLevel())
-                .append(", 好感度 ").append(maid.getFavorability()).append(" 点.)");
-        return block.toString();
+        StringBuilder block = new StringBuilder("(莫妮卡记得这些事:");
+        for (String memory : picked) {
+            block.append(' ').append(asStatement(memory));
+        }
+        return block.append(")").toString();
     }
 
     /** 记忆条目落进 prompt 前的收尾：补半角句号（known_info 语域一句一断）。 */

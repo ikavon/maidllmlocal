@@ -195,7 +195,7 @@ config/maidllmlocal/maica_account.json   ← 玩家唯一要碰的文件（模�
 | system 人设 | 我们发的 system 生效 | **后端覆盖**，我们的 system 被丢弃 |
 | savefile / 存档 RAG | 被后端 `prompt_writable` 总闸屏蔽 | 生效 |
 | 现实时间注入（MFocus） | 屏蔽 | 生效 |
-| 长期记忆 / 关系状态 | **不注入、不写回**（纯对话模式，v0.7.0） | 每轮注入（记忆 ≤1KB + 关系等级，known_info 语域） |
+| 长期记忆 | **不注入、不写回**（纯对话模式，v0.7.0） | 每轮注入（≤1KB，known_info 语域） |
 | 聊天内容 | 只留在玩家本机历史里 | **后端持久化**（README 已向玩家披露） |
 
 **为什么 -1 干脆不做记忆**（v0.7.0 定案）：-1 下 TLM 的 system 人设每轮重建、

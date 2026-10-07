@@ -56,7 +56,8 @@ public class MaicaClient implements LLMClient {
                 // 改挂到最后一条 user 消息正文——客户端只取这一条发出（见 CROSSFRONTEND.md L2）
                 history = withSceneWrap(maid, history);
             }
-            // -1 模式不做任何注入：它是纯对话模式，长期记忆与关系状态都归托管模式。
+            // -1 模式不做任何注入：它是纯对话模式，长期记忆归托管模式；好感度两边都只保留
+            // 「变化」（alter_affection 落 TLM 系统），不报当前数值。
             // 为什么"首轮注入一次"不成立、为什么干脆砍掉——见 MaicaMemory 类注释
             // 输入侧展开：MAS 人设卡常带 {player_name}，发出去前换成真名，模型不必再见宏
             messagesJson = MaicaMessages.toJson(expandPlayerMacros(history, playerName));

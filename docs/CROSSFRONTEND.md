@@ -116,7 +116,7 @@ DDLC 中知道自己是游戏角色的 canon 认知一致。MAICA 骨架的原�
 | L0 | MAICA 骨架（后端固定） | 莫妮卡内核、情感、语气——两端天然同一人 |
 | L1 | savefile additions（跨前端持久） | 旅行记忆——**不种种子**，由她自主蒸馏（write_memory 原样透传，见上） |
 | L2 | query 场景包装（MC 侧每轮） | 身处 Minecraft 世界/在这里有一具身体/维度·游戏天数·时刻·天气/当前状态/本存档首访标志 |
-| L2b | 女仆 NBT 长期记忆（MC 侧每轮） | write_memory 蒸馏出的 MC 本地记忆（≤1KB，known_info 语域）+ 当前关系等级——托管下这两层都挂在最后一条 user 消息上 |
+| L2b | 女仆 NBT 长期记忆（MC 侧每轮） | write_memory 蒸馏出的 MC 本地记忆（≤1KB，known_info 语域）——托管下与 L2 一样挂在最后一条 user 消息上 |
 | L3 | MTrigger（行为层） | 模式切换/好感度/write_memory，原样工作 |
 
 > **v0.7.0：-1 模式与注入彻底脱钩。** 此前 -1 下走的是「把长期记忆+好感度并进 system」
