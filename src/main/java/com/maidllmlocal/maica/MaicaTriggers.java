@@ -70,7 +70,8 @@ public final class MaicaTriggers {
     }
 
     /**
-     * {@code {"memory_item": "<一句记忆>"}} → 女仆 NBT（托管模式下下轮起随场景注入 prompt）。
+     * {@code {"memory_item": "<一句记忆>"}} → 女仆 NBT。托管模式下下轮起作为 temp
+     * additions 送后端检索池（不占窗口，见 {@link MaicaMemory#additions}）。
      * 只有托管会话会上传 write_memory 模板（见 MaicaTriggerUploader），-1 纯对话模式拿不到这条。
      */
     private static void writeMemory(EntityMaid maid, JsonObject args, String playerName) {

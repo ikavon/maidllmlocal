@@ -202,13 +202,33 @@ TLM 女仆 AI 聊天设置里的**「主人称呼」**（`ownerName`），留空
 | L0 | MAICA 骨架（后端固定） | 莫妮卡内核、情感、语气——两端天然同一人 |
 | L1 | savefile additions（跨前端持久） | 旅行记忆——**不种种子**，由她自主蒸馏（write_memory 原样透传，见上） |
 | L2 | query 场景包装（MC 侧每轮） | 身处 Minecraft 世界/在这里有一具身体/维度·游戏天数·时刻·天气/当前状态/本存档首访标志 |
-| L2b | 女仆 NBT 长期记忆（MC 侧每轮） | write_memory 蒸馏出的 MC 本地记忆（≤1KB，known_info 语域）——托管下与 L2 一样挂在最后一条 user 消息上 |
+| L2b | **temp savefile additions**（MC 侧每轮） | 静态世界事实（在 MC / 有身体 / 一天 20 分钟）+ write_memory 蒸馏出的 MC 本地记忆，作为 query 的 `savefile.mas_player_additions` 临时注入——与 perm 合并后进检索候选池，**不占对话窗口**（v0.7.0 从「并进 user 消息」改到这里） |
 | L3 | MTrigger（行为层） | 模式切换/好感度/write_memory，原样工作 |
 
 > **v0.7.0：-1 模式与注入彻底脱钩。** 此前 -1 下走的是「把长期记忆+好感度并进 system」
 > 的注入路径，每轮重发（TLM 的 system 每轮重建、历史不含注入块，所以「只发首轮」不成立，
 > 见 `MaicaMemory` 类注释）。现在 -1 = 纯对话模式：不注入、也不上传 `write_memory` 模板；
 > 长期记忆成为托管模式独有的能力（L2b 只在托管下存在）。好感度的**变化**两边都有。
+
+### temp savefile 注入的机制与硬约束（2026-10-07 源码实锤）
+
+- **temp 不落库、不进向量库**：`SessionPersistent.content_temp` 是会话对象上的普通内存
+  dict（`session_mgr.py:37`），`on_acquire()`/`clear()` 清空，每轮被 query payload 里那份
+  **直接覆盖**（`maica_ws.py:322`）。检索时 `filter_reranker` 的候选池 =
+  `filter_vector(query,10) ∪ form_info(where='temp')`（`session_late.py:96-99`，注释原话
+  *"We include full extras since there's no other way"*）——即每轮**现并进候选池、当场重排**。
+  ⇒ 重复发送不会在数据侧累积副本；换存档/换版本也没有后端残留要迁移。
+- **temp ∩ perm 不去重**：`read_key("mas_player_additions")` 是 `v = temp + perm` 直接相加
+  （`session_early.py:44-54`）⇒ 同一句若两边都有，known_info 里会出现两遍。真会撞的是
+  handoff 通道（把 MAS 条目复制成 temp），所以客户端合并时做了去重（`MaicaWsSession.mergeAdditions`）。
+- **条数硬限制 32**：`SessionPersistent.validate` 在 `len(form_info(where='temp')) > 32` 时抛
+  `MaicaInputWarning` ⇒ 发送前一律裁剪（`MaicaCarrier.MAX_ADDITIONS`）。
+- **召回是 top-2**：重排默认 `topk=2`（唯一调用方是 MFocus 的 persistent_acquire）⇒ 每轮最多
+  2 条进 known_info。这是后端自己的设计（MAS 的记忆同样如此），代价是「不保证每条都浮现」，
+  好处是零窗口占用、且与 MAS 的记忆共用同一条检索通道。
+- **传输**：知识条目在服务端的女仆实体上，发 query 的却是玩家客户端 ⇒ 走 `MaicaCarrier`
+  的哨兵消息（role `developer` + 固定前缀）捎过去，客户端摘下转成 `savefile` 字段。
+  不用新协议字段是为了不动两条线各自不同的网络层实现（主线 registrar / Forge SimpleChannel）。
 
 ## 两个实验方案
 

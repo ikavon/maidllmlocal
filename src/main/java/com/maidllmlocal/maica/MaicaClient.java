@@ -51,9 +51,10 @@ public class MaicaClient implements LLMClient {
         String messagesJson;
         try {
             List<LLMMessage> history = callback.getMessages();
-            if (hosted()) {
-                // 托管模式：后端丢弃 system（骨架提示词覆盖），人设/记忆/场景全部
-                // 改挂到最后一条 user 消息正文——客户端只取这一条发出（见 CROSSFRONTEND.md L2）
+            boolean hosted = hosted();
+            if (hosted) {
+                // 托管模式：后端丢弃 system（骨架提示词覆盖），人设/场景改挂到最后一条 user
+                // 消息正文——客户端只取这一条发出（见 CROSSFRONTEND.md L2）
                 history = withSceneWrap(maid, history);
             }
             // -1 模式不做任何注入：它是纯对话模式，长期记忆归托管模式；好感度两边都只保留
@@ -61,6 +62,11 @@ public class MaicaClient implements LLMClient {
             // 为什么"首轮注入一次"不成立、为什么干脆砍掉——见 MaicaMemory 类注释
             // 输入侧展开：MAS 人设卡常带 {player_name}，发出去前换成真名，模型不必再见宏
             messagesJson = MaicaMessages.toJson(expandPlayerMacros(history, playerName));
+            if (hosted) {
+                // 知识条目（静态世界事实 + 长期记忆）不占窗口：捎给客户端，由它并进 query 的
+                // savefile 临时注入（为什么走这条路见 MaicaMemory / MaicaCarrier 注释）
+                messagesJson = MaicaCarrier.attach(messagesJson, hostedAdditions(maid));
+            }
         } catch (Throwable t) {
             fail(callback, t);
             return;
@@ -196,32 +202,39 @@ public class MaicaClient implements LLMClient {
     }
 
     /**
-     * 托管模式的注入：场景事实（{@link MaicaScene}）+ 女仆 NBT 里的长期记忆
-     * （{@link MaicaMemory}），都并进最后一条 user 消息。只改发送副本，不写回 TLM 历史。
+     * 托管模式的场景包装：把「此刻」的事实（维度/天数/相位/天气/模式/处境）并进最后一条
+     * user 消息。只改发送副本，不写回 TLM 历史。
      *
-     * <p>为什么必须每轮注入：TLM 的 system 人设每轮重建、历史队列里只有问答轮次，
-     * 注入块没有任何持久载体——少注入一轮，她就少看见一次。这是托管模式下 MC 本地
-     * 记忆的唯一通道。
+     * <p>为什么场景必须每轮发：它报的是<b>此刻</b>，后端对 MC 世界状态一无所知；而 TLM 的
+     * system 人设每轮重建、历史队列里只有问答轮次，没有别的载体。反过来，<b>不随时间变的
+     * 那部分（在 MC、有身体、一天=20 分钟）不进这里</b>——它走 {@link MaicaScene#STATIC_FACTS}
+     * 的 temp 注入通道，免得每轮在窗口里堆同样的字（见 {@link MaicaMemory#additions}）。
      */
     private static List<LLMMessage> withSceneWrap(EntityMaid maid, List<LLMMessage> history) {
-        String memory = MaicaMemory.promptBlock(maid);
         List<LLMMessage> copy = new ArrayList<>(history.size());
         boolean wrapped = false;
         // 倒序找最后一条 user，包好后前面的原样保留（客户端只会取这一条发）
         for (int i = history.size() - 1; i >= 0; i--) {
             LLMMessage msg = history.get(i);
             if (!wrapped && msg.role() == Role.USER) {
-                String text = MaicaScene.wrap(maid, msg.message());
-                if (!memory.isEmpty()) {
-                    text = text + "\n\n" + memory;
-                }
-                copy.add(0, new LLMMessage(msg.role(), text, msg.gameTime()));
+                copy.add(0, new LLMMessage(msg.role(), MaicaScene.wrap(maid, msg.message()), msg.gameTime()));
                 wrapped = true;
                 continue;
             }
             copy.add(0, msg);
         }
         return copy;
+    }
+
+    /**
+     * 托管模式每轮送后端的知识条目：静态世界事实（恒在，无状态）+ 女仆 NBT 里的长期记忆。
+     * 顺序上静态事实在前，记忆从旧到新跟在后面。
+     */
+    private static List<String> hostedAdditions(EntityMaid maid) {
+        List<String> additions = new ArrayList<>();
+        additions.add(MaicaScene.STATIC_FACTS);
+        additions.addAll(MaicaMemory.additions(maid));
+        return additions;
     }
 
     private void fail(LLMCallback callback, Throwable throwable) {
