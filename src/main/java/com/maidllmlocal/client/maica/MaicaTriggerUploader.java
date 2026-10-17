@@ -24,7 +24,8 @@ import java.util.Set;
  * 一致——托管模式下就是那个托管号（≥1），否则她那个 session 拿到的是空表，
  * 后端照跑 MTrigger agent 却无工具可调，表现成"配了 enable_mt 却什么都不发生"。
  *
- * <p>表的内容是本模组支持的三件套：好感度增减 / 长期记忆写回 / 换工作模式。
+ * <p>表的内容是本模组支持的能力集：好感度增减 / 长期记忆写回（仅托管）/ 换工作模式 /
+ * 陪伴模式（跟或留）/ 坐姿（坐或站）。后两项 v0.8.0 新增，-1 与托管都可用。
  * 上传是<b>尽力而为</b>：失败只记日志——没有表的后端不发触发器帧，聊天本身不受影响。
  */
 public final class MaicaTriggerUploader {
@@ -164,6 +165,43 @@ public final class MaicaTriggerUploader {
         exprop.addProperty("suggestion", false);
         switchTask.add("exprop", exprop);
         table.add(switchTask);
+
+        // 陪伴模式：跟随或留在原地（服务端落 isHomeModeEnable，对应 TLM 官方
+        // switch_follow_state）。条目刻意用处境措辞、与 L2 场景行的处境句呼应——
+        // 「跟随开关」这类状态框架曾让她读出「我是不是挡路」（2026-09-18 实测）。
+        JsonObject presence = new JsonObject();
+        presence.addProperty("template", "common_switch_template");
+        presence.addProperty("name", "switch_presence");
+        JsonObject presenceExprop = new JsonObject();
+        JsonObject presenceName = new JsonObject();
+        presenceName.addProperty("zh", "陪伴模式");
+        presenceName.addProperty("en", "presence mode");
+        presenceExprop.add("item_name", presenceName);
+        JsonArray presenceItems = new JsonArray();
+        presenceItems.add("陪在玩家身边");
+        presenceItems.add("留在原地等玩家回来");
+        presenceExprop.add("item_list", presenceItems);
+        presenceExprop.addProperty("suggestion", false);
+        presence.add("exprop", presenceExprop);
+        table.add(presence);
+
+        // 坐姿：坐下或站起来（服务端落 setInSittingPose，对应 TLM 官方 switch_sit）。
+        // 拍照、等待这类请求的正解是坐下而不是空闲——此前只能空转在 idle 任务上。
+        JsonObject sitting = new JsonObject();
+        sitting.addProperty("template", "common_switch_template");
+        sitting.addProperty("name", "switch_sitting");
+        JsonObject sittingExprop = new JsonObject();
+        JsonObject sittingName = new JsonObject();
+        sittingName.addProperty("zh", "坐姿");
+        sittingName.addProperty("en", "sitting posture");
+        sittingExprop.add("item_name", sittingName);
+        JsonArray sittingItems = new JsonArray();
+        sittingItems.add("坐下");
+        sittingItems.add("站起来");
+        sittingExprop.add("item_list", sittingItems);
+        sittingExprop.addProperty("suggestion", false);
+        sitting.add("exprop", sittingExprop);
+        table.add(sitting);
 
         return table;
     }

@@ -44,6 +44,8 @@ public final class MaicaTriggers {
             case "alter_affection" -> alterAffection(maid, trigger.arguments());
             case "write_memory" -> writeMemory(maid, trigger.arguments(), playerName);
             case "switch_work_task" -> switchWorkTask(maid, trigger.arguments());
+            case "switch_presence" -> switchPresence(maid, trigger.arguments());
+            case "switch_sitting" -> switchSitting(maid, trigger.arguments());
             default -> MaidLLMLocal.LOGGER.warn("unknown maica trigger {}, ignored", trigger.name());
         }
     }
@@ -124,6 +126,66 @@ public final class MaicaTriggers {
         // isEnable 条件不满足的任务 TLM 大脑自然不会执行，这里不需要预检
         maid.setTask(matched);
         MaidLLMLocal.LOGGER.info("maica task switch: maid {} → {}", maid.getUUID(), matched.getUid());
+    }
+
+    /**
+     * {@code {"choice": "陪在玩家身边|留在原地等玩家回来"}} → 跟随/居家模式
+     * （TLM 官方 switch_follow_state 的 MTrigger 通道）。isHomeModeEnable(true)=不跟随、
+     * 留在原地等她回来，没有第三态。条目是本表自管的固定中文串，先靠关键词兜底
+     * （后端偶尔回措辞变体），英文串再兜一层（跨 locale 时模型可能改口）。
+     */
+    private static void switchPresence(EntityMaid maid, JsonObject args) {
+        String raw = stringChoice(args, "switch_presence");
+        if (raw == null) {
+            return;
+        }
+        String name = raw.toLowerCase();
+        boolean follow = name.contains("身边") || name.contains("陪") || name.contains("跟随")
+                || name.contains("follow");
+        boolean home = name.contains("原地") || name.contains("等") || name.contains("家")
+                || name.contains("home");
+        if (follow && !home) {
+            maid.setHomeModeEnable(false);
+            MaidLLMLocal.LOGGER.info("maica presence: maid {} → follow player", maid.getUUID());
+        } else if (home && !follow) {
+            maid.setHomeModeEnable(true);
+            MaidLLMLocal.LOGGER.info("maica presence: maid {} → stay in place and wait", maid.getUUID());
+        } else {
+            MaidLLMLocal.LOGGER.warn("maica presence: ambiguous choice {}", raw);
+        }
+    }
+
+    /**
+     * {@code {"choice": "坐下|站起来"}} → 坐姿（TLM 官方 switch_sit 的 MTrigger 通道）。
+     * 坐下后与导航/跟随的联动是 TLM 内部职责，这里不多做。
+     */
+    private static void switchSitting(EntityMaid maid, JsonObject args) {
+        String raw = stringChoice(args, "switch_sitting");
+        if (raw == null) {
+            return;
+        }
+        String name = raw.toLowerCase();
+        boolean down = name.contains("坐") || name.contains("sit");
+        boolean up = name.contains("站") || name.contains("起来") || name.contains("stand");
+        if (down && !up) {
+            maid.setInSittingPose(true);
+            MaidLLMLocal.LOGGER.info("maica sitting: maid {} → sit", maid.getUUID());
+        } else if (up && !down) {
+            maid.setInSittingPose(false);
+            MaidLLMLocal.LOGGER.info("maica sitting: maid {} → stand", maid.getUUID());
+        } else {
+            MaidLLMLocal.LOGGER.warn("maica sitting: ambiguous choice {}", raw);
+        }
+    }
+
+    /** 取 choice 字符串；非字符串（后端「无合适条目」回布尔 False）不算失败，返回 null。 */
+    private static String stringChoice(JsonObject args, String triggerName) {
+        JsonElement choice = args.get("choice");
+        if (choice == null || !choice.isJsonPrimitive() || !choice.getAsJsonPrimitive().isString()) {
+            MaidLLMLocal.LOGGER.info("maica {}: backend returned no suitable choice", triggerName);
+            return null;
+        }
+        return choice.getAsString();
     }
 
     private static String abbreviate(String s) {
